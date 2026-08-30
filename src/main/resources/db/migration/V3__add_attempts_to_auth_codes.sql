@@ -1,0 +1,1 @@
+ALTER TABLE auth_codes ADD COLUMN attempts INT NOT NULL DEFAULT 0;
