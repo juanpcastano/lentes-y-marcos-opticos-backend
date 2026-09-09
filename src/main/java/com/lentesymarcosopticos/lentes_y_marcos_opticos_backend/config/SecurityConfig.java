@@ -69,7 +69,10 @@ public class SecurityConfig {
 							"/api/auth/password/reset/request",
 							"/api/auth/password/reset/verify",
 							"/api/auth/password/reset/confirm")
-					.permitAll()
+						.permitAll()
+						.requestMatchers(HttpMethod.GET, "/api/products/**", "/api/categories/**",
+								"/api/brands/**")
+						.permitAll()
 						.requestMatchers("/error").permitAll()
 						.anyRequest().authenticated())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
