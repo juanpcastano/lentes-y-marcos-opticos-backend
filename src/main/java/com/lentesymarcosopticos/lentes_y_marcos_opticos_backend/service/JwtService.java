@@ -38,22 +38,25 @@ public class JwtService {
 		this.parser = Jwts.parser().verifyWith(key).build();
 	}
 
-	public String generateAccessToken(String email) {
-		return buildToken(email, ACCESS_TYPE, accessExpiration);
+	public String generateAccessToken(String email, boolean admin) {
+		return buildToken(email, ACCESS_TYPE, accessExpiration, admin);
 	}
 
 	public String generateRefreshToken(String email) {
-		return buildToken(email, REFRESH_TYPE, refreshExpiration);
+		return buildToken(email, REFRESH_TYPE, refreshExpiration, false);
 	}
 
-	private String buildToken(String email, String type, long expiration) {
-		return Jwts.builder()
+	private String buildToken(String email, String type, long expiration, boolean admin) {
+		var builder = Jwts.builder()
 				.subject(email)
 				.claim("type", type)
 				.issuedAt(new Date())
 				.expiration(new Date(System.currentTimeMillis() + expiration))
-				.signWith(key, Jwts.SIG.HS512)
-				.compact();
+				.signWith(key, Jwts.SIG.HS512);
+		if (admin) {
+			builder.claim("admin", true);
+		}
+		return builder.compact();
 	}
 
 	public String extractEmail(String token) {
@@ -66,6 +69,16 @@ public class JwtService {
 		return parser.parseSignedClaims(token)
 				.getPayload()
 				.get("type", String.class);
+	}
+
+	public boolean isAdminToken(String token) {
+		try {
+			return Boolean.TRUE.equals(parser.parseSignedClaims(token)
+					.getPayload()
+					.get("admin", Boolean.class));
+		} catch (JwtException e) {
+			return false;
+		}
 	}
 
 	public boolean isAccessToken(String token) {

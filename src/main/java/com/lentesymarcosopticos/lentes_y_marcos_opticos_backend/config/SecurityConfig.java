@@ -13,6 +13,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -20,6 +22,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.security.JwtAuthenticationFilter;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.UserRepository;
 
 import lombok.AllArgsConstructor;
 
@@ -31,10 +34,22 @@ import lombok.AllArgsConstructor;
 public class SecurityConfig {
 
 	private final JwtAuthenticationFilter jwtFilter;
+	private final UserRepository userRepository;
 
 	@Bean
 	public PasswordEncoder passwordEncoder() {
 		return new BCryptPasswordEncoder();
+	}
+
+	@Bean
+	public UserDetailsService userDetailsService() {
+		return username -> userRepository.findByEmail(username)
+				.map(user -> org.springframework.security.core.userdetails.User
+						.withUsername(user.getEmail())
+						.password(user.getPasswordHash() == null ? "{noop}disabled" : user.getPasswordHash())
+						.roles(Boolean.TRUE.equals(user.getIsAdmin()) ? "ADMIN" : "USER")
+						.build())
+				.orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
 	}
 
 	@Bean
@@ -73,6 +88,7 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.GET, "/api/products/**", "/api/categories/**",
 								"/api/brands/**")
 						.permitAll()
+						.requestMatchers("/api/admin/**").hasRole("ADMIN")
 						.requestMatchers("/error").permitAll()
 						.anyRequest().authenticated())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

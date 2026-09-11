@@ -2,12 +2,14 @@ package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -80,12 +82,12 @@ public class Product {
 
 	@ManyToMany(fetch = FetchType.LAZY)
 	@JoinTable(name = "product_categories", joinColumns = @JoinColumn(name = "product_id"), inverseJoinColumns = @JoinColumn(name = "category_id"))
-	private Set<Category> categories;
+	private Set<Category> categories = new LinkedHashSet<>();
 
-	@OneToMany(mappedBy = "product", fetch = FetchType.LAZY)
+	@OneToMany(mappedBy = "product", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
 	@OrderBy("sortOrder")
-	private Set<ProductImage> images;
+	private Set<ProductImage> images = new LinkedHashSet<>();
 
-	@OneToMany(mappedBy = "product", fetch = FetchType.LAZY)
-	private Set<ProductVariant> variants;
+	@OneToMany(mappedBy = "product", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
+	private Set<ProductVariant> variants = new LinkedHashSet<>();
 }

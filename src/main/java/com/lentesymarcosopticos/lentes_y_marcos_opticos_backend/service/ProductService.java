@@ -69,7 +69,7 @@ public class ProductService {
 
 	@Transactional(readOnly = true)
 	public ProductDetailDto getProductById(UUID id) {
-		Product product = productRepository.findActiveDetailById(id)
+		Product product = productRepository.findDetailById(id)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Product not found"));
 		return toDetail(product);
 	}
@@ -114,7 +114,7 @@ public class ProductService {
 		return new ProductDetailDto(p.getId(), primaryImage(p), p.getName(), brandName(p),
 				discounted, p.getMaterial(), p.getShape(), categoryNames(p), badge(p),
 				additionalImages, p.getBasePrice(), discounted, discount, p.getDescription(),
-				variants);
+				variants, p.getIsActive());
 	}
 
 	private int finalPrice(Product p) {
@@ -123,8 +123,8 @@ public class ProductService {
 	}
 
 	private VariantDto toVariant(ProductVariant v) {
-		return new VariantDto(v.getId(), v.getVariantName(), v.getVariantValue(), v.getSku(),
-				v.getPriceAdjustment(), v.getImageUrl());
+		return new VariantDto(v.getId(), v.getVariantName(), v.getSku(),
+				v.getPriceAdjustment(), v.getImageUrl(), v.getIsActive());
 	}
 
 	private String primaryImage(Product p) {

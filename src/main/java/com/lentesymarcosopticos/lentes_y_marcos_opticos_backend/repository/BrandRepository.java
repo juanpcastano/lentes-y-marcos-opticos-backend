@@ -12,4 +12,6 @@ import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.Brand;
  */
 public interface BrandRepository extends JpaRepository<Brand, UUID> {
 	List<Brand> findByIsFeaturedTrue();
+
+	boolean existsByName(String name);
 }

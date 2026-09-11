@@ -21,5 +21,6 @@ public record ProductDetailDto(
 		Integer discountedPrice,
 		Integer discountPercentage,
 		String description,
-		List<VariantDto> variants) {
+		List<VariantDto> variants,
+		Boolean isActive) {
 }

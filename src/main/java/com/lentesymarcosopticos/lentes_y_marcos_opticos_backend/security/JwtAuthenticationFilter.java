@@ -1,9 +1,12 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.security;
 
 import java.io.IOException;
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -53,10 +56,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 				return;
 			}
 
+			List<GrantedAuthority> authorities = new ArrayList<>();
+			if (jwtService.isAdminToken(token)) {
+				authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN"));
+			}
+
 			UsernamePasswordAuthenticationToken user = new UsernamePasswordAuthenticationToken(
 					email,
 					null,
-					Collections.emptyList());
+					authorities);
 			SecurityContextHolder.getContext().setAuthentication(user);
 
 			filterChain.doFilter(request, response);

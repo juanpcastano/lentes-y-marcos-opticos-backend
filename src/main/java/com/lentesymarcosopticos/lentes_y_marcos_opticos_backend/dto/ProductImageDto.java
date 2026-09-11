@@ -3,13 +3,11 @@ package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto;
 import java.util.UUID;
 
 /**
- * VariantDto
+ * ProductImageDto
  */
-public record VariantDto(
+public record ProductImageDto(
 		UUID id,
-		String variantName,
-		String sku,
-		Integer priceAdjustment,
 		String imageUrl,
-		Boolean isActive) {
+		Boolean isPrimary,
+		Integer sortOrder) {
 }

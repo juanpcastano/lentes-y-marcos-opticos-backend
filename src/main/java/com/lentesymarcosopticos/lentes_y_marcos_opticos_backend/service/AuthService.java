@@ -59,7 +59,7 @@ public class AuthService {
 		User savedUser = userRepository.save(userEntity);
 		UserResponse user = toUserResponse(savedUser);
 		return new AuthResult(
-				jwtService.generateAccessToken(signupRequest.email()),
+				jwtService.generateAccessToken(signupRequest.email(), false),
 				jwtService.generateRefreshToken(signupRequest.email()),
 				user);
 	}
@@ -76,7 +76,7 @@ public class AuthService {
 
 		UserResponse user = toUserResponse(userEntity);
 		return new AuthResult(
-				jwtService.generateAccessToken(loginRequest.email()),
+				jwtService.generateAccessToken(loginRequest.email(), Boolean.TRUE.equals(userEntity.getIsAdmin())),
 				jwtService.generateRefreshToken(loginRequest.email()),
 				user);
 	}
@@ -107,7 +107,7 @@ public class AuthService {
 				.orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Código inválido o expirado"));
 
 		return new AuthResult(
-				jwtService.generateAccessToken(request.email()),
+				jwtService.generateAccessToken(request.email(), Boolean.TRUE.equals(user.getIsAdmin())),
 				jwtService.generateRefreshToken(request.email()),
 				toUserResponse(user));
 	}
@@ -122,7 +122,7 @@ public class AuthService {
 				.orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Refresh token inválido o expirado"));
 
 		return new AuthResult(
-				jwtService.generateAccessToken(email),
+				jwtService.generateAccessToken(email, Boolean.TRUE.equals(user.getIsAdmin())),
 				jwtService.generateRefreshToken(email),
 				toUserResponse(user));
 	}
@@ -235,7 +235,7 @@ public class AuthService {
 		}
 
 		return new AuthResult(
-				jwtService.generateAccessToken(user.getEmail()),
+				jwtService.generateAccessToken(user.getEmail(), Boolean.TRUE.equals(user.getIsAdmin())),
 				jwtService.generateRefreshToken(user.getEmail()),
 				toUserResponse(user));
 	}
