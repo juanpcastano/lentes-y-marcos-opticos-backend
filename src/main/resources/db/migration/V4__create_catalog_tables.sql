@@ -40,9 +40,7 @@ CREATE TABLE product_variants (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     variant_name VARCHAR(100),
-    variant_value VARCHAR(100),
     sku VARCHAR(100) UNIQUE,
-    price_adjustment INTEGER,
     image_url VARCHAR(500),
     is_active BOOLEAN DEFAULT TRUE
 );

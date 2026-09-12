@@ -124,7 +124,7 @@ public class ProductService {
 
 	private VariantDto toVariant(ProductVariant v) {
 		return new VariantDto(v.getId(), v.getVariantName(), v.getSku(),
-				v.getPriceAdjustment(), v.getImageUrl(), v.getIsActive());
+				v.getImageUrl(), v.getIsActive());
 	}
 
 	private String primaryImage(Product p) {

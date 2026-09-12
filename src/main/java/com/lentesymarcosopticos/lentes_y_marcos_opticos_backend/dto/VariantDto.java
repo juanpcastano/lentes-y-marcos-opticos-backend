@@ -9,7 +9,6 @@ public record VariantDto(
 		UUID id,
 		String variantName,
 		String sku,
-		Integer priceAdjustment,
 		String imageUrl,
 		Boolean isActive) {
 }

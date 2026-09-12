@@ -381,7 +381,6 @@ public class AdminProductService {
 	private void applyVariant(ProductVariant variant, ProductUpsertRequest.VariantRequest vr) {
 		variant.setVariantName(trimOrNull(vr.variantName()));
 		variant.setSku(trimOrNull(vr.sku()));
-		variant.setPriceAdjustment(vr.priceAdjustment());
 		variant.setImageUrl(trimOrNull(vr.imageUrl()));
 		variant.setIsActive(vr.isActive() == null || vr.isActive());
 	}
@@ -433,7 +432,7 @@ public class AdminProductService {
 
 	private VariantDto toVariantDto(ProductVariant v) {
 		return new VariantDto(v.getId(), v.getVariantName(), v.getSku(),
-				v.getPriceAdjustment(), v.getImageUrl(), v.getIsActive());
+				v.getImageUrl(), v.getIsActive());
 	}
 
 	private AdminProductDto toDto(Product p) {

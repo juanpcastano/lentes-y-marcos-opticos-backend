@@ -36,14 +36,8 @@ public class ProductVariant {
 	@Column
 	private String variantName;
 
-	@Column
-	private String variantValue;
-
 	@Column(unique = true)
 	private String sku;
-
-	@Column
-	private Integer priceAdjustment;
 
 	@Column
 	private String imageUrl;
