@@ -23,6 +23,12 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
 	@Query("SELECT DISTINCT p FROM Product p LEFT JOIN FETCH p.images LEFT JOIN FETCH p.categories LEFT JOIN FETCH p.variants WHERE p.id IN :ids")
 	List<Product> findAllWithDetailsByIdIn(@Param("ids") List<UUID> ids);
 
+	@Query("SELECT DISTINCT p FROM Product p LEFT JOIN FETCH p.images")
+	List<Product> findAllWithImages();
+
+	@Query("SELECT DISTINCT p FROM Product p LEFT JOIN FETCH p.variants")
+	List<Product> findAllWithVariants();
+
 	@Query("SELECT DISTINCT p FROM Product p LEFT JOIN FETCH p.images LEFT JOIN FETCH p.categories LEFT JOIN FETCH p.variants WHERE p.id = :id AND p.isActive = true")
 	Optional<Product> findActiveDetailById(@Param("id") UUID id);
 

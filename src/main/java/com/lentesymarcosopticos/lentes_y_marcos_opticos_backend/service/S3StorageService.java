@@ -3,6 +3,7 @@ package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -18,6 +19,7 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 /**
@@ -34,14 +36,16 @@ public class S3StorageService implements StorageService {
 			"image/webp", "webp");
 
 	private final String bucket;
+	private final String region;
 	private final String publicUrlBase;
 	private final S3Client client;
 
 	public S3StorageService(
-			@Value("${aws.s3.bucket}") String bucket,
-			@Value("${aws.s3.region}") String region,
-			@Value("${aws.s3.public-url-base}") String publicUrlBase) {
+				@Value("${aws.s3.bucket}") String bucket,
+				@Value("${aws.s3.region}") String region,
+				@Value("${aws.s3.public-url-base}") String publicUrlBase) {
 		this.bucket = bucket == null ? "" : bucket.trim();
+		this.region = region == null ? "us-east-1" : region.trim();
 		this.publicUrlBase = publicUrlBase == null ? "" : publicUrlBase.trim();
 		if (this.bucket.isEmpty()) {
 			this.client = null;
@@ -51,7 +55,7 @@ public class S3StorageService implements StorageService {
 		S3Client built = null;
 		try {
 			built = S3Client.builder()
-					.region(Region.of(region))
+					.region(Region.of(this.region))
 					.credentialsProvider(DefaultCredentialsProvider.create())
 					.build();
 		} catch (RuntimeException e) {
@@ -95,12 +99,40 @@ public class S3StorageService implements StorageService {
 	}
 
 	@Override
-	public void delete(String url) {
+	public List<StoredObject> list(String folder) {
 		if (!enabled()) {
-			return;
+			throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
+					"Storage no configurado (aws.s3.bucket)");
 		}
-		String key = extractKey(url);
-		if (key == null) {
+		String prefix = folder.endsWith("/") ? folder : folder + "/";
+		List<StoredObject> objects = new java.util.ArrayList<>();
+		String continuationToken = null;
+		do {
+			var request = ListObjectsV2Request.builder()
+					.bucket(bucket)
+					.prefix(prefix);
+			if (continuationToken != null) {
+				request.continuationToken(continuationToken);
+			}
+			var response = client.listObjectsV2(request.build());
+			response.contents().stream()
+					.filter(object -> !object.key().endsWith("/"))
+					.map(object -> new StoredObject(object.key(),
+							publicUrlBase.isEmpty() ? defaultUrl(object.key()) : publicUrlBase + "/" + object.key()))
+					.forEach(objects::add);
+			continuationToken = response.isTruncated() ? response.nextContinuationToken() : null;
+		} while (continuationToken != null);
+		return objects;
+	}
+
+	@Override
+	public String keyForUrl(String url) {
+		return extractKey(url);
+	}
+
+	@Override
+	public void deleteKey(String key) {
+		if (!enabled() || key == null || key.isBlank()) {
 			return;
 		}
 		try {
@@ -110,8 +142,16 @@ public class S3StorageService implements StorageService {
 		}
 	}
 
+	@Override
+	public void delete(String url) {
+		if (!enabled()) {
+			return;
+		}
+		deleteKey(extractKey(url));
+	}
+
 	private String defaultUrl(String key) {
-		return "https://%s.s3.amazonaws.com/%s".formatted(bucket, key);
+		return "https://%s.s3.%s.amazonaws.com/%s".formatted(bucket, region, key);
 	}
 
 	/**

@@ -2,6 +2,7 @@ package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service;
 
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -243,6 +244,25 @@ public class AdminProductService {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "El archivo está vacío");
 		}
 		String url = storageService.store(file, "products/" + productId);
+		return addImageUrl(product, url, primary);
+	}
+
+	@Transactional
+	public ProductImageDto addExistingImage(UUID productId, String url, Boolean primary) {
+		Product product = loadDetail(productId);
+		String key = storageService.keyForUrl(url);
+		if (key == null || !key.startsWith("products/") || key.contains("..")) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "La imagen no pertenece al almacenamiento de productos");
+		}
+		boolean exists = storageService.list("products").stream()
+				.anyMatch(object -> object.key().equals(key));
+		if (!exists) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "La imagen seleccionada ya no existe");
+		}
+		return addImageUrl(product, url, primary);
+	}
+
+	private ProductImageDto addImageUrl(Product product, String url, Boolean primary) {
 
 		boolean asPrimary = Boolean.TRUE.equals(primary) || product.getImages().isEmpty();
 		if (asPrimary) {
@@ -270,8 +290,13 @@ public class AdminProductService {
 				.filter(img -> img.getId().equals(imageId))
 				.findFirst()
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Imagen no encontrada"));
+		boolean wasPrimary = Boolean.TRUE.equals(image.getIsPrimary());
 		product.getImages().remove(image);
-		storageService.delete(image.getImageUrl());
+		if (wasPrimary) {
+			product.getImages().stream()
+					.min(Comparator.comparing(img -> img.getSortOrder() == null ? Integer.MAX_VALUE : img.getSortOrder()))
+					.ifPresent(next -> next.setIsPrimary(true));
+		}
 	}
 
 	@Transactional
@@ -284,6 +309,30 @@ public class AdminProductService {
 		product.getImages().forEach(img -> img.setIsPrimary(false));
 		target.setIsPrimary(true);
 		return toImageDto(target);
+	}
+
+	@Transactional
+	public List<ProductImageDto> reorderImages(UUID productId, List<UUID> imageIds) {
+		Product product = loadDetail(productId);
+		List<ProductImage> images = product.getImages().stream().toList();
+		if (images.isEmpty() && (imageIds == null || imageIds.isEmpty())) {
+			return List.of();
+		}
+		if (imageIds == null || imageIds.size() != images.size()
+				|| imageIds.size() != new LinkedHashSet<>(imageIds).size()
+				|| images.stream().map(ProductImage::getId).anyMatch(id -> !imageIds.contains(id))) {
+			throw new ApiException(HttpStatus.BAD_REQUEST,
+					"El orden debe incluir exactamente todas las imágenes del producto");
+		}
+
+		Map<UUID, ProductImage> byId = images.stream()
+				.collect(Collectors.toMap(ProductImage::getId, Function.identity()));
+		for (int index = 0; index < imageIds.size(); index++) {
+			byId.get(imageIds.get(index)).setSortOrder(index + 1);
+		}
+		ProductImage first = byId.get(imageIds.get(0));
+		product.getImages().forEach(img -> img.setIsPrimary(img == first));
+		return imageIds.stream().map(byId::get).map(this::toImageDto).toList();
 	}
 
 	// ---------- helpers ----------

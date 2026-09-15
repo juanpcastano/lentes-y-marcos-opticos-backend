@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Private-write/public-read S3 bucket for LM Opticos product images
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Globally unique S3 bucket name
+
+Resources:
+  ProductImagesBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - http://localhost:3000
+              - https://lentesymarcosopticos.com
+              - https://www.lentesymarcosopticos.com
+            AllowedMethods:
+              - GET
+              - HEAD
+            AllowedHeaders:
+              - "*"
+            ExposedHeaders:
+              - ETag
+            MaxAge: 3600
+
+  ProductImagesReadPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ProductImagesBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadProductImages
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::${ProductImagesBucket}/products/*"
+              - !Sub "arn:${AWS::Partition}:s3:::${ProductImagesBucket}/categories/*"
+              - !Sub "arn:${AWS::Partition}:s3:::${ProductImagesBucket}/brands/*"
+
+Outputs:
+  BucketName:
+    Value: !Ref ProductImagesBucket
+  PublicUrlBase:
+    Value: !Sub "https://${ProductImagesBucket}.s3.${AWS::Region}.amazonaws.com"

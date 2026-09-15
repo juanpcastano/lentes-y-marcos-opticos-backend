@@ -22,6 +22,7 @@ import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.FacetsDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PageResponse;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.ProductImageDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.ProductUpsertRequest;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.ExistingProductImageRequest;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service.AdminProductService;
 
 import jakarta.validation.Valid;
@@ -95,6 +96,13 @@ public class AdminProductController {
 		return ResponseEntity.status(201).body(adminProductService.addImage(id, file, primary));
 	}
 
+	@PostMapping("/{id}/images/existing")
+	public ResponseEntity<ProductImageDto> addExistingImage(@PathVariable UUID id,
+			@RequestBody ExistingProductImageRequest request) {
+		return ResponseEntity.status(201).body(adminProductService.addExistingImage(id,
+				request.imageUrl(), request.primary()));
+	}
+
 	@DeleteMapping("/{id}/images/{imageId}")
 	public ResponseEntity<Void> deleteImage(@PathVariable UUID id, @PathVariable UUID imageId) {
 		adminProductService.deleteImage(id, imageId);
@@ -105,5 +113,11 @@ public class AdminProductController {
 	public ResponseEntity<ProductImageDto> setPrimaryImage(@PathVariable UUID id,
 			@PathVariable UUID imageId) {
 		return ResponseEntity.ok(adminProductService.setPrimaryImage(id, imageId));
+	}
+
+	@PutMapping("/{id}/images/order")
+	public ResponseEntity<List<ProductImageDto>> reorderImages(@PathVariable UUID id,
+			@RequestBody List<UUID> imageIds) {
+		return ResponseEntity.ok(adminProductService.reorderImages(id, imageIds));
 	}
 }
