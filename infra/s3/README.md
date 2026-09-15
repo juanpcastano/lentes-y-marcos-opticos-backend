@@ -32,7 +32,7 @@ Adjuntar al rol IAM que ejecuta Spring Boot una política con alcance únicament
       "Resource": "arn:aws:s3:::lentesymarcosopticos-images-bucket",
       "Condition": {
         "StringLike": {
-          "s3:prefix": ["categories/*", "brands/*"]
+          "s3:prefix": ["products/*", "categories/*", "brands/*"]
         }
       }
     },
@@ -51,7 +51,7 @@ Adjuntar al rol IAM que ejecuta Spring Boot una política con alcance únicament
 
 No se deben configurar `AWS_ACCESS_KEY_ID` ni `AWS_SECRET_ACCESS_KEY` en el servidor si se usa un rol IAM de EC2/ECS. En local, el SDK toma el perfil configurado por AWS CLI.
 
-El backend usa `s3:ListBucket` para mostrar en el panel las imágenes existentes de `categories/` y `brands/`. La subida y eliminación requieren permisos sobre objetos del bucket.
+El backend usa `s3:ListBucket` para mostrar en el panel las imágenes existentes de `products/` (galería y selector de imágenes existentes del formulario de producto), `categories/` y `brands/`. La subida y eliminación requieren permisos sobre objetos del bucket.
 
 ## Variables del backend
 
