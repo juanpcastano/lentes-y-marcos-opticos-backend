@@ -38,12 +38,13 @@ public class ProductController {
 			@RequestParam(required = false) Integer priceMax,
 			@RequestParam(required = false) Boolean onSale,
 			@RequestParam(required = false) Boolean isNew,
+			@RequestParam(required = false) String q,
 			@RequestParam(required = false) String sort,
 			@RequestParam(defaultValue = "0") int page,
 			@RequestParam(defaultValue = "24") int size) {
 
 		return ResponseEntity.ok(productService.getProducts(categories, brands, materials, shapes,
-				priceMin, priceMax, sort, onSale, isNew, page, size));
+				priceMin, priceMax, sort, onSale, isNew, q, page, size));
 	}
 
 	@GetMapping("/facets")

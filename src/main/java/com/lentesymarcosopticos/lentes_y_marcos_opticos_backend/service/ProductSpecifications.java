@@ -2,6 +2,7 @@ package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service;
 
 import java.util.List;
 
+import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Subquery;
 
@@ -95,12 +96,36 @@ public final class ProductSpecifications {
 						java.time.LocalDateTime.now().minusDays(30));
 	}
 
+	/** Búsqueda libre: nombre, descripción, marca, material, forma y categorías */
+	public static Specification<Product> textSearch(String q) {
+		return (root, query, cb) -> {
+			if (q == null || q.isBlank()) {
+				return null;
+			}
+			String search = "%" + q.toLowerCase().trim() + "%";
+			var brandJoin = root.join("brand", JoinType.LEFT);
+			Subquery<Integer> categorySearch = query.subquery(Integer.class);
+			var categoryRoot = categorySearch.from(Product.class);
+			var categoryJoin = categoryRoot.join("categories");
+			categorySearch.select(cb.literal(1)).where(
+					cb.equal(categoryRoot.get("id"), root.get("id")),
+					cb.like(cb.lower(categoryJoin.get("name")), search));
+			return cb.or(
+					cb.like(cb.lower(root.get("name")), search),
+					cb.like(cb.lower(root.get("description")), search),
+					cb.like(cb.lower(brandJoin.get("name")), search),
+					cb.like(cb.lower(root.get("material")), search),
+					cb.like(cb.lower(root.get("shape")), search),
+					cb.exists(categorySearch));
+		};
+	}
+
 	public static Specification<Product> combine(List<String> categories, List<String> brands,
 			List<String> materials, List<String> shapes, Integer priceMin, Integer priceMax, String sort,
-			Boolean onSale, Boolean isNew) {
+			Boolean onSale, Boolean isNew, String q) {
 		Specification<Product> filters = isActive().and(categoryIn(categories)).and(brandIn(brands))
 				.and(materialIn(materials)).and(shapeIn(shapes)).and(priceGte(priceMin)).and(priceLte(priceMax))
-				.and(onSale(onSale)).and(isNew(isNew));
+				.and(onSale(onSale)).and(isNew(isNew)).and(textSearch(q));
 
 		return (root, query, cb) -> {
 			if (query.getResultType() != Long.class && query.getResultType() != long.class) {
