@@ -16,6 +16,7 @@ import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.ProductIm
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.exception.ApiException;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.BrandRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.CategoryRepository;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.HeroSlideRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.ProductRepository;
 
 import lombok.AllArgsConstructor;
@@ -24,12 +25,13 @@ import lombok.AllArgsConstructor;
 @AllArgsConstructor
 public class AdminMediaService {
 
-	private static final List<String> FOLDERS = List.of("products", "brands", "categories");
+	private static final List<String> FOLDERS = List.of("products", "brands", "categories", "hero");
 
 	private final StorageService storageService;
 	private final BrandRepository brandRepository;
 	private final CategoryRepository categoryRepository;
 	private final ProductRepository productRepository;
+	private final HeroSlideRepository heroSlideRepository;
 
 	@Transactional(readOnly = true)
 	public List<MediaAssetDto> listGallery() {
@@ -68,6 +70,8 @@ public class AdminMediaService {
 		productRepository.findAllWithVariants().forEach(product -> product.getVariants().forEach(variant ->
 				add(result, variant.getImageUrl(), new MediaReferenceDto("variant", product.getId().toString(),
 						product.getName() + " / " + variant.getVariantName()))));
+		heroSlideRepository.findAll().forEach(slide -> add(result, slide.getImageUrl(),
+				new MediaReferenceDto("hero", slide.getId().toString(), slide.getTitle())));
 		return result;
 	}
 
@@ -99,6 +103,12 @@ public class AdminMediaService {
 				variant.setImageUrl(null);
 			}
 		}));
+		heroSlideRepository.findAll().forEach(slide -> {
+			if (key.equals(storageService.keyForUrl(slide.getImageUrl()))) {
+				slide.setImageUrl(null);
+				slide.setIsActive(false);
+			}
+		});
 	}
 
 	private void add(Map<String, List<MediaReferenceDto>> references, String url, MediaReferenceDto reference) {

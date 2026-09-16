@@ -47,12 +47,14 @@ public class AdminProductController {
 			@RequestParam(required = false) List<String> shapes,
 			@RequestParam(required = false) Integer priceMin,
 			@RequestParam(required = false) Integer priceMax,
+			@RequestParam(required = false) Boolean onSale,
+			@RequestParam(required = false) Boolean isNew,
 			@RequestParam(required = false) Boolean active,
 			@RequestParam(required = false) String sort,
 			@RequestParam(defaultValue = "0") int page,
 			@RequestParam(defaultValue = "24") int size) {
 		return ResponseEntity.ok(adminProductService.list(q, brands, categories, materials, shapes,
-				priceMin, priceMax, active, sort, page, size));
+				priceMin, priceMax, onSale, isNew, active, sort, page, size));
 	}
 
 	@GetMapping("/facets")

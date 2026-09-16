@@ -59,7 +59,7 @@ public class AdminProductService {
 	@Transactional(readOnly = true)
 	public PageResponse<AdminProductDto> list(String q, List<String> brands, List<String> categories,
 			List<String> materials, List<String> shapes, Integer priceMin, Integer priceMax,
-			Boolean active, String sort, int page, int size) {
+			Boolean onSale, Boolean isNew, Boolean active, String sort, int page, int size) {
 		Pageable pageable = PageRequest.of(page, size);
 		Page<Product> result = productRepository.findAll((root, query, cb) -> {
 			if (query.getResultType() != Long.class && query.getResultType() != long.class) {
@@ -101,6 +101,14 @@ public class AdminProductService {
 			if (priceMax != null) {
 				predicate = cb.and(predicate,
 						cb.lessThanOrEqualTo(ProductSpecifications.discountedPrice(root, cb), priceMax.doubleValue()));
+			}
+			if (onSale != null && onSale) {
+				predicate = cb.and(predicate,
+						ProductSpecifications.onSale(true).toPredicate(root, query, cb));
+			}
+			if (isNew != null && isNew) {
+				predicate = cb.and(predicate,
+						ProductSpecifications.isNew(true).toPredicate(root, query, cb));
 			}
 			if (categories != null && !categories.isEmpty()) {
 				var subquery = query.subquery(Integer.class);

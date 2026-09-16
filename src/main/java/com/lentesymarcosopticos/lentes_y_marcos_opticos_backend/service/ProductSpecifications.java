@@ -80,10 +80,27 @@ public final class ProductSpecifications {
 				: cb.lessThanOrEqualTo(discountedPrice(root, cb), priceMax.doubleValue());
 	}
 
+	/** En oferta: mismo criterio que el badge OFERTA (descuento > 0) */
+	public static Specification<Product> onSale(Boolean onSale) {
+		return (root, query, cb) -> onSale == null || !onSale
+				? null
+				: cb.greaterThan(root.get("discountPercentage"), 0);
+	}
+
+	/** Novedad: mismo criterio que el badge NUEVO (creado hace < 30 días) */
+	public static Specification<Product> isNew(Boolean isNew) {
+		return (root, query, cb) -> isNew == null || !isNew
+				? null
+				: cb.greaterThanOrEqualTo(root.get("createdAt"),
+						java.time.LocalDateTime.now().minusDays(30));
+	}
+
 	public static Specification<Product> combine(List<String> categories, List<String> brands,
-			List<String> materials, List<String> shapes, Integer priceMin, Integer priceMax, String sort) {
+			List<String> materials, List<String> shapes, Integer priceMin, Integer priceMax, String sort,
+			Boolean onSale, Boolean isNew) {
 		Specification<Product> filters = isActive().and(categoryIn(categories)).and(brandIn(brands))
-				.and(materialIn(materials)).and(shapeIn(shapes)).and(priceGte(priceMin)).and(priceLte(priceMax));
+				.and(materialIn(materials)).and(shapeIn(shapes)).and(priceGte(priceMin)).and(priceLte(priceMax))
+				.and(onSale(onSale)).and(isNew(isNew));
 
 		return (root, query, cb) -> {
 			if (query.getResultType() != Long.class && query.getResultType() != long.class) {

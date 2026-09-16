@@ -29,7 +29,7 @@ import lombok.AllArgsConstructor;
 @AllArgsConstructor
 public class AdminMediaController {
 
-	private static final Set<String> ALLOWED_FOLDERS = Set.of("categories", "brands", "products");
+	private static final Set<String> ALLOWED_FOLDERS = Set.of("categories", "brands", "products", "hero");
 
 	private final StorageService storageService;
 	private final AdminMediaService adminMediaService;

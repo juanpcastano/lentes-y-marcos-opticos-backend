@@ -46,10 +46,11 @@ public class ProductService {
 	@Transactional(readOnly = true)
 	public PageResponse<ProductSummaryDto> getProducts(List<String> categories, List<String> brands,
 			List<String> materials, List<String> shapes, Integer priceMin, Integer priceMax, String sort,
-			int page, int size) {
+			Boolean onSale, Boolean isNew, int page, int size) {
 
 		Pageable pageable = PageRequest.of(page, size);
-		var spec = ProductSpecifications.combine(categories, brands, materials, shapes, priceMin, priceMax, sort);
+		var spec = ProductSpecifications.combine(categories, brands, materials, shapes, priceMin, priceMax,
+				sort, onSale, isNew);
 		Page<Product> result = productRepository.findAll(spec, pageable);
 
 		// Segunda consulta para traer imágenes/categorías/variantes de la página en
@@ -78,7 +79,7 @@ public class ProductService {
 	public List<ProductSummaryDto> getTopSellers() {
 		// Sin ventas aún (F4) — placeholder: los más recientes
 		Page<Product> result = productRepository.findAll(ProductSpecifications.combine(null, null, null, null,
-				null, null, "relevance"), PageRequest.of(0, TOP_SELLERS_LIMIT));
+				null, null, "relevance", null, null), PageRequest.of(0, TOP_SELLERS_LIMIT));
 		List<UUID> ids = result.getContent().stream().map(Product::getId).toList();
 		Map<UUID, Product> details = productRepository.findAllWithDetailsByIdIn(ids).stream()
 				.collect(Collectors.toMap(Product::getId, Function.identity()));
