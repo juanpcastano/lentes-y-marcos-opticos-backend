@@ -78,10 +78,10 @@ public class AdminProductController {
 		return ResponseEntity.ok(adminProductService.update(id, request));
 	}
 
-	/** Soft delete (is_active = false) */
+	/** Hard delete (eliminación permanente, no se puede deshacer) */
 	@DeleteMapping("/{id}")
 	public ResponseEntity<Void> delete(@PathVariable UUID id) {
-		adminProductService.deactivate(id);
+		adminProductService.deleteProduct(id);
 		return ResponseEntity.noContent().build();
 	}
 

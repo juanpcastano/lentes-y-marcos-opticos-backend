@@ -49,7 +49,7 @@ public class GlobalExceptionHandler {
 				ex.getStatus().getReasonPhrase(),
 				ex.getMessage(),
 				currentPath(),
-				null);
+				ex.getDetails());
 
 		return ResponseEntity.status(ex.getStatus()).body(response);
 	}

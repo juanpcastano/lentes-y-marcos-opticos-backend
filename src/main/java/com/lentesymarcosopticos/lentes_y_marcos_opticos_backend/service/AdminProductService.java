@@ -230,10 +230,14 @@ public class AdminProductService {
 		return toDto(product);
 	}
 
-	/** Soft delete: is_active = false */
+	/**
+	 * Hard delete: elimina el producto con sus variantes e imágenes (DB). Las
+	 * imágenes en S3 quedan huérfanas y se purgan desde /admin/gallery.
+	 */
 	@Transactional
-	public void deactivate(UUID id) {
-		setActive(id, false);
+	public void deleteProduct(UUID id) {
+		Product product = loadDetail(id);
+		productRepository.delete(product);
 	}
 
 	@Transactional
