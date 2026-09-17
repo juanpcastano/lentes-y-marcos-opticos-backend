@@ -299,7 +299,7 @@ public class SoftixImportService {
 					: product.getCategories().stream()
 							.map(c -> c.getName()).sorted().toList();
 			result.put(variant.getSku(), new ExistingSnapshot(product.getName(),
-					product.getBasePrice(), brand, categories, product.getProductType()));
+					variant.getPrice(), brand, categories, product.getProductType()));
 		}
 		return result;
 	}

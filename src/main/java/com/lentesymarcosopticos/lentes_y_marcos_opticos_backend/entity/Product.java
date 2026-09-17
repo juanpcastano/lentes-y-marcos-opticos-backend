@@ -5,7 +5,6 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
-
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -21,7 +20,6 @@ import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.OneToMany;
-import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -30,7 +28,6 @@ import lombok.Setter;
 /**
  * Product
  */
-
 @Entity
 @Table(name = "products")
 @NoArgsConstructor
@@ -48,12 +45,6 @@ public class Product {
 	@JoinColumn(name = "brand_id")
 	private Brand brand;
 
-	@Column(nullable = false)
-	private Integer basePrice;
-
-	@Column
-	private Integer discountPercentage;
-
 	@Column
 	private String material;
 
@@ -69,9 +60,6 @@ public class Product {
 	@Column
 	private String productType;
 
-	@Column
-	private Boolean isActive;
-
 	@CreationTimestamp
 	@Column(nullable = false, updatable = false)
 	private LocalDateTime createdAt;
@@ -83,10 +71,6 @@ public class Product {
 	@ManyToMany(fetch = FetchType.LAZY)
 	@JoinTable(name = "product_categories", joinColumns = @JoinColumn(name = "product_id"), inverseJoinColumns = @JoinColumn(name = "category_id"))
 	private Set<Category> categories = new LinkedHashSet<>();
-
-	@OneToMany(mappedBy = "product", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
-	@OrderBy("sortOrder")
-	private Set<ProductImage> images = new LinkedHashSet<>();
 
 	@OneToMany(mappedBy = "product", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
 	private Set<ProductVariant> variants = new LinkedHashSet<>();

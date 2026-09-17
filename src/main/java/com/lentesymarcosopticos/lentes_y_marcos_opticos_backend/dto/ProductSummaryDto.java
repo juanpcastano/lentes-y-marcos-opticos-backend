@@ -4,16 +4,20 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * ProductSummaryDto — DTO "achatado" para el catálogo: brand como string,
- * categories como string[], imageUrl = imagen primaria. El badge es derivado:
- * OFERTA si hay descuento; NUEVO si tiene &lt; 30 días.
+ * ProductSummaryDto — una fila por variante activa: brand como string,
+ * categories como string[], imageUrl = imagen primaria de la variante.
+ * Badge: OFERTA si la variante tiene descuento; NUEVO si producto &lt; 30 días.
  */
 public record ProductSummaryDto(
-		UUID id,
+		UUID variantId,
+		UUID productId,
 		String imageUrl,
 		String name,
+		String color,
 		String brand,
 		Integer price,
+		Integer originalPrice,
+		Integer discountPercentage,
 		String material,
 		String shape,
 		List<String> categories,

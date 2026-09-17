@@ -29,7 +29,7 @@ import lombok.AllArgsConstructor;
 @AllArgsConstructor
 public class AdminMediaController {
 
-	private static final Set<String> ALLOWED_FOLDERS = Set.of("categories", "brands", "products", "hero");
+	private static final Set<String> ALLOWED_FOLDERS = Set.of("categories", "brands", "variants", "hero");
 
 	private final StorageService storageService;
 	private final AdminMediaService adminMediaService;
@@ -58,12 +58,12 @@ public class AdminMediaController {
 	public ResponseEntity<MediaImageDto> upload(@PathVariable String folder,
 			@RequestPart("file") MultipartFile file) {
 		String normalizedFolder = normalizeFolder(folder);
-		if ("products".equals(normalizedFolder)) {
-			throw new ApiException(HttpStatus.BAD_REQUEST,
-					"Las imágenes de productos deben subirse desde el formulario del producto");
-		}
-		String url = storageService.store(file, normalizedFolder);
-		String key = url.substring(url.indexOf(normalizedFolder));
+		// Staging de variantes: subida inmediata al bucket sin referencia en
+		// DB (ver `variants/staging/`). Al guardar el producto/edición, las
+		// URLs se adjuntan como VariantImage de las variantes nuevas.
+		String targetFolder = "variants".equals(normalizedFolder) ? "variants/staging" : normalizedFolder;
+		String url = storageService.store(file, targetFolder);
+		String key = url.substring(url.indexOf(targetFolder));
 		return ResponseEntity.status(HttpStatus.CREATED).body(new MediaImageDto(key, url));
 	}
 

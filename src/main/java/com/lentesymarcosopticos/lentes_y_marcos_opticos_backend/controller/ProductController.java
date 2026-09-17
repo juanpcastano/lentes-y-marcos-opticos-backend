@@ -34,6 +34,7 @@ public class ProductController {
 			@RequestParam(required = false) List<String> brands,
 			@RequestParam(required = false) List<String> materials,
 			@RequestParam(required = false) List<String> shapes,
+			@RequestParam(required = false) List<String> colors,
 			@RequestParam(required = false) Integer priceMin,
 			@RequestParam(required = false) Integer priceMax,
 			@RequestParam(required = false) Boolean onSale,
@@ -44,7 +45,7 @@ public class ProductController {
 			@RequestParam(defaultValue = "24") int size) {
 
 		return ResponseEntity.ok(productService.getProducts(categories, brands, materials, shapes,
-				priceMin, priceMax, sort, onSale, isNew, q, page, size));
+				colors, priceMin, priceMax, sort, onSale, isNew, q, page, size));
 	}
 
 	@GetMapping("/facets")
@@ -58,7 +59,8 @@ public class ProductController {
 	}
 
 	@GetMapping("/{id}")
-	public ResponseEntity<ProductDetailDto> getProductById(@PathVariable UUID id) {
-		return ResponseEntity.ok(productService.getProductById(id));
+	public ResponseEntity<ProductDetailDto> getProductById(@PathVariable UUID id,
+			@RequestParam(required = false) UUID variant) {
+		return ResponseEntity.ok(productService.getProductById(id, variant));
 	}
 }

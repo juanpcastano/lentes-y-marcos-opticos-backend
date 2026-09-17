@@ -4,12 +4,17 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * ProductDetailDto — detalle con imágenes, variantes y precios calculados
+ * ProductDetailDto — detalle de producto con variante seleccionada.
+ * price = precio final de la seleccionada (compat).
+ * id y productId son el id del producto (productId lo usa el carrito).
  */
 public record ProductDetailDto(
 		UUID id,
+		UUID productId,
+		UUID variantId,
 		String imageUrl,
 		String name,
+		String color,
 		String brand,
 		Integer price,
 		String material,
@@ -22,5 +27,5 @@ public record ProductDetailDto(
 		Integer discountPercentage,
 		String description,
 		List<VariantDto> variants,
-		Boolean isActive) {
+		VariantDto selectedVariant) {
 }

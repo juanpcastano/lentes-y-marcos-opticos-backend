@@ -21,20 +21,21 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.AdminProductDto;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.AdminProductDto.AdminVariantDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.FacetsDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PageResponse;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.ProductImageDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.ProductUpsertRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.VariantDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.Brand;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.Category;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.Product;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.ProductImage;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.ProductVariant;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.VariantImage;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.exception.ApiException;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.BrandRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.CategoryRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.ProductRepository;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.ProductVariantRepository;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Join;
@@ -45,21 +46,24 @@ import jakarta.persistence.criteria.Root;
 import lombok.AllArgsConstructor;
 
 /**
- * AdminProductService — CRUD de productos desde el panel de administración
+ * AdminProductService — CRUD de productos desde el panel de administración.
+ * El precio, el descuento y las imágenes viven en la variante (color).
  */
 @Service
 @AllArgsConstructor
 public class AdminProductService {
 
 	private final ProductRepository productRepository;
+	private final ProductVariantRepository variantRepository;
 	private final CategoryRepository categoryRepository;
 	private final BrandRepository brandRepository;
 	private final StorageService storageService;
 
 	@Transactional(readOnly = true)
 	public PageResponse<AdminProductDto> list(String q, List<String> brands, List<String> categories,
-			List<String> materials, List<String> shapes, Integer priceMin, Integer priceMax,
-			Boolean onSale, Boolean isNew, Boolean active, String sort, int page, int size) {
+			List<String> materials, List<String> shapes, List<String> colors, Integer priceMin,
+			Integer priceMax, Boolean onSale, Boolean isNew, Boolean active, String sort, int page,
+			int size) {
 		Pageable pageable = PageRequest.of(page, size);
 		Page<Product> result = productRepository.findAll((root, query, cb) -> {
 			if (query.getResultType() != Long.class && query.getResultType() != long.class) {
@@ -67,23 +71,12 @@ public class AdminProductService {
 			}
 			Predicate predicate = cb.conjunction();
 			if (q != null && !q.isBlank()) {
-				String search = "%" + q.toLowerCase().trim() + "%";
-				var categorySearch = query.subquery(Integer.class);
-				var categoryRoot = categorySearch.from(Product.class);
-				var categoryJoin = categoryRoot.join("categories");
-				categorySearch.select(cb.literal(1)).where(
-						cb.equal(categoryRoot.get("id"), root.get("id")),
-						cb.like(cb.lower(categoryJoin.get("name")), search));
 				predicate = cb.and(predicate,
-						cb.or(
-								cb.like(cb.lower(root.get("name")), search),
-								cb.like(cb.lower(root.get("description")), search),
-								cb.like(cb.lower(root.get("brand").get("name")), search),
-								cb.like(cb.lower(root.get("material")), search),
-								cb.exists(categorySearch)));
+						ProductSpecifications.textSearch(q).toPredicate(root, query, cb));
 			}
 			if (active != null) {
-				predicate = cb.and(predicate, cb.equal(root.get("isActive"), active));
+				predicate = cb.and(predicate,
+						ProductSpecifications.hasActiveVariant(active).toPredicate(root, query, cb));
 			}
 			if (brands != null && !brands.isEmpty()) {
 				predicate = cb.and(predicate, root.get("brand").get("name").in(brands));
@@ -94,13 +87,17 @@ public class AdminProductService {
 			if (shapes != null && !shapes.isEmpty()) {
 				predicate = cb.and(predicate, root.get("shape").in(shapes));
 			}
+			if (colors != null && !colors.isEmpty()) {
+				predicate = cb.and(predicate,
+						ProductSpecifications.colorIn(colors).toPredicate(root, query, cb));
+			}
 			if (priceMin != null) {
 				predicate = cb.and(predicate,
-						cb.greaterThanOrEqualTo(ProductSpecifications.discountedPrice(root, cb), priceMin.doubleValue()));
+						ProductSpecifications.priceGte(priceMin).toPredicate(root, query, cb));
 			}
 			if (priceMax != null) {
 				predicate = cb.and(predicate,
-						cb.lessThanOrEqualTo(ProductSpecifications.discountedPrice(root, cb), priceMax.doubleValue()));
+						ProductSpecifications.priceLte(priceMax).toPredicate(root, query, cb));
 			}
 			if (onSale != null && onSale) {
 				predicate = cb.and(predicate,
@@ -111,13 +108,8 @@ public class AdminProductService {
 						ProductSpecifications.isNew(true).toPredicate(root, query, cb));
 			}
 			if (categories != null && !categories.isEmpty()) {
-				var subquery = query.subquery(Integer.class);
-				var subRoot = subquery.from(Product.class);
-				var categoryJoin = subRoot.join("categories");
-				subquery.select(cb.literal(1))
-						.where(cb.equal(subRoot.get("id"), root.get("id")),
-								categoryJoin.get("name").in(categories));
-				predicate = cb.and(predicate, cb.exists(subquery));
+				predicate = cb.and(predicate,
+						ProductSpecifications.categoryIn(categories).toPredicate(root, query, cb));
 			}
 			return predicate;
 		}, pageable);
@@ -137,11 +129,21 @@ public class AdminProductService {
 
 	@Transactional(readOnly = true)
 	public FacetsDto facets() {
-		Object[] row = (Object[]) productRepository.findAllPriceBounds()[0];
-		Integer minPrice = row != null ? (int) Math.round(((Number) row[0]).doubleValue()) : null;
-		Integer maxPrice = row != null ? (int) Math.round(((Number) row[1]).doubleValue()) : null;
-		return new FacetsDto(productRepository.findAllDistinctMaterials(),
-				productRepository.findAllDistinctShapes(), minPrice, maxPrice);
+		List<Object[]> bounds = productRepository.findPriceBounds();
+		Integer minPrice = null;
+		Integer maxPrice = null;
+		if (!bounds.isEmpty() && bounds.get(0) != null) {
+			Object[] row = bounds.get(0);
+			if (row[0] != null) {
+				minPrice = (int) Math.round(((Number) row[0]).doubleValue());
+			}
+			if (row[1] != null) {
+				maxPrice = (int) Math.round(((Number) row[1]).doubleValue());
+			}
+		}
+		return new FacetsDto(productRepository.findDistinctMaterials(),
+				productRepository.findDistinctShapes(), productRepository.findDistinctColors(),
+				minPrice, maxPrice);
 	}
 
 	@Transactional(readOnly = true)
@@ -153,14 +155,11 @@ public class AdminProductService {
 	public AdminProductDto create(ProductUpsertRequest request) {
 		Product product = new Product();
 		product.setName(request.name().trim());
-		product.setBasePrice(request.basePrice());
-		product.setDiscountPercentage(request.discountPercentage());
 		product.setMaterial(trimOrNull(request.material()));
 		product.setShape(trimOrNull(request.shape()));
 		product.setDescription(request.description());
 		product.setTaxRate(request.taxRate());
 		product.setProductType(request.productType().trim());
-		product.setIsActive(request.isActive() == null || request.isActive());
 		product.setBrand(resolveBrand(request.brandId()));
 		product.setCategories(new HashSet<>(resolveCategories(request.categories())));
 
@@ -175,6 +174,7 @@ public class AdminProductService {
 			ProductVariant variant = new ProductVariant();
 			variant.setProduct(saved);
 			applyVariant(variant, vr);
+			attachStagedImages(variant, vr.images());
 			saved.getVariants().add(variant);
 		}
 		productRepository.saveAndFlush(saved);
@@ -187,12 +187,6 @@ public class AdminProductService {
 
 		if (request.name() != null && !request.name().isBlank()) {
 			product.setName(request.name().trim());
-		}
-		if (request.basePrice() != null) {
-			product.setBasePrice(request.basePrice());
-		}
-		if (request.discountPercentage() != null) {
-			product.setDiscountPercentage(request.discountPercentage());
 		}
 		if (request.material() != null) {
 			product.setMaterial(trimOrNull(request.material()));
@@ -208,9 +202,6 @@ public class AdminProductService {
 		}
 		if (request.productType() != null && !request.productType().isBlank()) {
 			product.setProductType(request.productType().trim());
-		}
-		if (request.isActive() != null) {
-			product.setIsActive(request.isActive());
 		}
 		if (request.brandId() != null) {
 			product.setBrand(resolveBrand(request.brandId()));
@@ -240,110 +231,105 @@ public class AdminProductService {
 		productRepository.delete(product);
 	}
 
-	@Transactional
-	public void setActive(UUID id, boolean active) {
-		Product product = productRepository.findById(id)
-				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Producto no encontrado"));
-		product.setIsActive(active);
-	}
-
-	// ---------- imágenes ----------
+	// ---------- imágenes de variante ----------
 
 	@Transactional
-	public ProductImageDto addImage(UUID productId, MultipartFile file, Boolean primary) {
-		Product product = loadDetail(productId);
+	public ProductImageDto addImage(UUID variantId, MultipartFile file, Boolean primary) {
+		ProductVariant variant = loadVariant(variantId);
 		if (file == null || file.isEmpty()) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "El archivo está vacío");
 		}
-		String url = storageService.store(file, "products/" + productId);
-		return addImageUrl(product, url, primary);
+		String url = storageService.store(file, "variants/" + variantId);
+		return addImageUrl(variant, url, primary);
 	}
 
 	@Transactional
-	public ProductImageDto addExistingImage(UUID productId, String url, Boolean primary) {
-		Product product = loadDetail(productId);
+	public ProductImageDto addExistingImage(UUID variantId, String url, Boolean primary) {
+		ProductVariant variant = loadVariant(variantId);
 		String key = storageService.keyForUrl(url);
-		if (key == null || !key.startsWith("products/") || key.contains("..")) {
-			throw new ApiException(HttpStatus.BAD_REQUEST, "La imagen no pertenece al almacenamiento de productos");
+		if (key == null || key.contains("..") || !key.startsWith("variants/")) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "La imagen no pertenece al almacenamiento de variantes");
 		}
-		boolean exists = storageService.list("products").stream()
+		boolean exists = storageService.list("variants").stream()
 				.anyMatch(object -> object.key().equals(key));
 		if (!exists) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "La imagen seleccionada ya no existe");
 		}
-		return addImageUrl(product, url, primary);
+		return addImageUrl(variant, url, primary);
 	}
 
-	private ProductImageDto addImageUrl(Product product, String url, Boolean primary) {
-
-		boolean asPrimary = Boolean.TRUE.equals(primary) || product.getImages().isEmpty();
-		if (asPrimary) {
-			product.getImages().forEach(img -> img.setIsPrimary(false));
+	private ProductImageDto addImageUrl(ProductVariant variant, String url, Boolean primary) {
+		if (variant.getImages() == null) {
+			variant.setImages(new LinkedHashSet<>());
 		}
-		int nextSort = product.getImages().stream()
-				.map(ProductImage::getSortOrder)
+		boolean asPrimary = Boolean.TRUE.equals(primary) || variant.getImages().isEmpty();
+		if (asPrimary) {
+			variant.getImages().forEach(img -> img.setIsPrimary(false));
+		}
+		int nextSort = variant.getImages().stream()
+				.map(VariantImage::getSortOrder)
 				.filter(Objects::nonNull)
 				.max(Comparator.naturalOrder())
 				.orElse(0) + 1;
 
-		ProductImage image = new ProductImage();
-		image.setProduct(product);
+		VariantImage image = new VariantImage();
+		image.setVariant(variant);
 		image.setImageUrl(url);
 		image.setIsPrimary(asPrimary);
 		image.setSortOrder(nextSort);
-		product.getImages().add(image);
+		variant.getImages().add(image);
 		return toImageDto(image);
 	}
 
 	@Transactional
-	public void deleteImage(UUID productId, UUID imageId) {
-		Product product = loadDetail(productId);
-		ProductImage image = product.getImages().stream()
+	public void deleteImage(UUID variantId, UUID imageId) {
+		ProductVariant variant = loadVariant(variantId);
+		VariantImage image = variant.getImages().stream()
 				.filter(img -> img.getId().equals(imageId))
 				.findFirst()
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Imagen no encontrada"));
 		boolean wasPrimary = Boolean.TRUE.equals(image.getIsPrimary());
-		product.getImages().remove(image);
+		variant.getImages().remove(image);
 		if (wasPrimary) {
-			product.getImages().stream()
+			variant.getImages().stream()
 					.min(Comparator.comparing(img -> img.getSortOrder() == null ? Integer.MAX_VALUE : img.getSortOrder()))
 					.ifPresent(next -> next.setIsPrimary(true));
 		}
 	}
 
 	@Transactional
-	public ProductImageDto setPrimaryImage(UUID productId, UUID imageId) {
-		Product product = loadDetail(productId);
-		ProductImage target = product.getImages().stream()
+	public ProductImageDto setPrimaryImage(UUID variantId, UUID imageId) {
+		ProductVariant variant = loadVariant(variantId);
+		VariantImage target = variant.getImages().stream()
 				.filter(img -> img.getId().equals(imageId))
 				.findFirst()
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Imagen no encontrada"));
-		product.getImages().forEach(img -> img.setIsPrimary(false));
+		variant.getImages().forEach(img -> img.setIsPrimary(false));
 		target.setIsPrimary(true);
 		return toImageDto(target);
 	}
 
 	@Transactional
-	public List<ProductImageDto> reorderImages(UUID productId, List<UUID> imageIds) {
-		Product product = loadDetail(productId);
-		List<ProductImage> images = product.getImages().stream().toList();
+	public List<ProductImageDto> reorderImages(UUID variantId, List<UUID> imageIds) {
+		ProductVariant variant = loadVariant(variantId);
+		List<VariantImage> images = variant.getImages().stream().toList();
 		if (images.isEmpty() && (imageIds == null || imageIds.isEmpty())) {
 			return List.of();
 		}
 		if (imageIds == null || imageIds.size() != images.size()
 				|| imageIds.size() != new LinkedHashSet<>(imageIds).size()
-				|| images.stream().map(ProductImage::getId).anyMatch(id -> !imageIds.contains(id))) {
+				|| images.stream().map(VariantImage::getId).anyMatch(id -> !imageIds.contains(id))) {
 			throw new ApiException(HttpStatus.BAD_REQUEST,
-					"El orden debe incluir exactamente todas las imágenes del producto");
+					"El orden debe incluir exactamente todas las imágenes de la variante");
 		}
 
-		Map<UUID, ProductImage> byId = images.stream()
-				.collect(Collectors.toMap(ProductImage::getId, Function.identity()));
+		Map<UUID, VariantImage> byId = images.stream()
+				.collect(Collectors.toMap(VariantImage::getId, Function.identity()));
 		for (int index = 0; index < imageIds.size(); index++) {
 			byId.get(imageIds.get(index)).setSortOrder(index + 1);
 		}
-		ProductImage first = byId.get(imageIds.get(0));
-		product.getImages().forEach(img -> img.setIsPrimary(img == first));
+		VariantImage first = byId.get(imageIds.get(0));
+		variant.getImages().forEach(img -> img.setIsPrimary(img == first));
 		return imageIds.stream().map(byId::get).map(this::toImageDto).toList();
 	}
 
@@ -367,18 +353,14 @@ public class AdminProductService {
 						? cb.desc(cb.lower(brand.<String>get("name")))
 						: cb.asc(cb.lower(brand.<String>get("name")));
 			}
-			case "basePrice" -> primary = desc
-					? cb.desc(root.get("basePrice"))
-					: cb.asc(root.get("basePrice"));
-			case "isActive" -> primary = desc
-					? cb.desc(root.get("isActive"))
-					: cb.asc(root.get("isActive"));
 			case "createdAt" -> primary = desc
 					? cb.desc(root.get("createdAt"))
 					: cb.asc(root.get("createdAt"));
 			case "updatedAt" -> primary = desc
 					? cb.desc(root.get("updatedAt"))
 					: cb.asc(root.get("updatedAt"));
+			// Sin precio único a nivel producto: el orden por precio vive en el
+			// catálogo (por variante). Se degrada a novedad.
 			default -> primary = cb.desc(root.get("createdAt"));
 		}
 		return List.of(primary, cb.desc(root.get("id")));
@@ -387,6 +369,11 @@ public class AdminProductService {
 	private Product loadDetail(UUID id) {
 		return productRepository.findDetailById(id)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Producto no encontrado"));
+	}
+
+	private ProductVariant loadVariant(UUID variantId) {
+		return variantRepository.findById(variantId)
+				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Variante no encontrada"));
 	}
 
 	private Brand resolveBrand(UUID brandId) {
@@ -426,6 +413,7 @@ public class AdminProductService {
 				ProductVariant variant = new ProductVariant();
 				variant.setProduct(product);
 				applyVariant(variant, vr);
+				attachStagedImages(variant, vr.images());
 				product.getVariants().add(variant);
 			} else {
 				ProductVariant variant = existing.get(vr.id());
@@ -440,24 +428,80 @@ public class AdminProductService {
 	}
 
 	private void applyVariant(ProductVariant variant, ProductUpsertRequest.VariantRequest vr) {
-		variant.setVariantName(trimOrNull(vr.variantName()));
+		variant.setColor(trimOrNull(vr.color()));
 		variant.setSku(trimOrNull(vr.sku()));
-		variant.setImageUrl(trimOrNull(vr.imageUrl()));
+		variant.setPrice(vr.price());
+		variant.setDiscountPercentage(vr.discountPercentage());
 		variant.setIsActive(vr.isActive() == null || vr.isActive());
 	}
 
-	private void validateVariants(List<ProductUpsertRequest.VariantRequest> variants) {
-		Set<String> names = new HashSet<>();
-		for (var variant : variants) {
-			String name = trimOrNull(variant.variantName());
-			if (name == null
-					|| trimOrNull(variant.sku()) == null) {
+	/**
+	 * Crea las filas VariantImage de una variante nueva a partir de URLs ya
+	 * subidas a `variants/` (staging sin referencias). Valida pertenencia al
+	 * bucket, existencia y duplicados; la primera es la principal salvo que
+	 * el request marque otra. Las imágenes de variantes existentes se
+	 * gestionan por endpoints dedicados y aquí se ignoran.
+	 */
+	private void attachStagedImages(ProductVariant variant,
+			List<ProductUpsertRequest.VariantImageRequest> images) {
+		if (images == null || images.isEmpty()) {
+			return;
+		}
+		Set<String> storedKeys = storageService.list("variants").stream()
+				.map(StorageService.StoredObject::key)
+				.collect(Collectors.toSet());
+		if (variant.getImages() == null) {
+			variant.setImages(new LinkedHashSet<>());
+		}
+		Set<String> seen = new HashSet<>();
+		boolean hasPrimary = images.stream()
+				.anyMatch(ref -> Boolean.TRUE.equals(ref.primary()));
+		int order = 0;
+		for (var ref : images) {
+			String url = ref.imageUrl() == null ? null : ref.imageUrl().trim();
+			String key = url == null ? null : storageService.keyForUrl(url);
+			if (url == null || url.isEmpty() || key == null || key.contains("..")
+					|| !key.startsWith("variants/")) {
 				throw new ApiException(HttpStatus.BAD_REQUEST,
-						"Cada variante debe tener nombre y SKU");
+						"La imagen no pertenece al almacenamiento de variantes");
 			}
-			if (!names.add(name.toLowerCase(Locale.ROOT))) {
+			if (!storedKeys.contains(key)) {
 				throw new ApiException(HttpStatus.BAD_REQUEST,
-						"No puede haber variantes con el mismo nombre");
+						"La imagen seleccionada ya no existe");
+			}
+			if (!seen.add(key)) {
+				throw new ApiException(HttpStatus.BAD_REQUEST,
+						"Imagen duplicada en la variante");
+			}
+			VariantImage image = new VariantImage();
+			image.setVariant(variant);
+			image.setImageUrl(url);
+			image.setIsPrimary(hasPrimary ? Boolean.TRUE.equals(ref.primary()) : order == 0);
+			image.setSortOrder(++order);
+			variant.getImages().add(image);
+		}
+	}
+
+	private void validateVariants(List<ProductUpsertRequest.VariantRequest> variants) {
+		Set<String> colors = new HashSet<>();
+		for (var variant : variants) {
+			String color = trimOrNull(variant.color());
+			if (color == null || trimOrNull(variant.sku()) == null) {
+				throw new ApiException(HttpStatus.BAD_REQUEST,
+						"Cada variante debe tener color y SKU");
+			}
+			if (variant.price() == null || variant.price() <= 0) {
+				throw new ApiException(HttpStatus.BAD_REQUEST,
+						"Cada variante debe tener un precio mayor a cero");
+			}
+			if (variant.discountPercentage() != null
+					&& (variant.discountPercentage() < 0 || variant.discountPercentage() > 100)) {
+				throw new ApiException(HttpStatus.BAD_REQUEST,
+						"El descuento de cada variante debe estar entre 0 y 100");
+			}
+			if (!colors.add(color.toLowerCase(Locale.ROOT))) {
+				throw new ApiException(HttpStatus.BAD_REQUEST,
+						"No puede haber variantes con el mismo color");
 			}
 		}
 	}
@@ -487,37 +531,42 @@ public class AdminProductService {
 		return t.isEmpty() ? null : t;
 	}
 
-	private ProductImageDto toImageDto(ProductImage img) {
+	private ProductImageDto toImageDto(VariantImage img) {
 		return new ProductImageDto(img.getId(), img.getImageUrl(), img.getIsPrimary(), img.getSortOrder());
 	}
 
-	private VariantDto toVariantDto(ProductVariant v) {
-		return new VariantDto(v.getId(), v.getVariantName(), v.getSku(),
-				v.getImageUrl(), v.getIsActive());
-	}
-
-	private AdminProductDto toDto(Product p) {
-		Brand brand = p.getBrand();
-		List<ProductImageDto> images = p.getImages() == null ? List.of()
-				: p.getImages().stream()
+	private AdminVariantDto toVariantDto(ProductVariant v) {
+		List<ProductImageDto> images = v.getImages() == null ? List.of()
+				: v.getImages().stream()
 						.sorted(Comparator
-								.comparing(ProductImage::getIsPrimary,
+								.comparing(VariantImage::getIsPrimary,
 										Comparator.nullsLast(Comparator.reverseOrder()))
 								.thenComparing(img -> img.getSortOrder() == null ? Integer.MAX_VALUE
 										: img.getSortOrder()))
 						.map(this::toImageDto)
 						.toList();
-		List<VariantDto> variants = p.getVariants() == null ? List.of()
+		int discount = v.getDiscountPercentage() != null ? v.getDiscountPercentage() : 0;
+		int discounted = v.getPrice() != null
+				? v.getPrice() - (int) Math.round(v.getPrice() * discount / 100.0)
+				: 0;
+		return new AdminVariantDto(v.getId(), v.getColor(), v.getSku(), v.getPrice(),
+				v.getDiscountPercentage(), discounted, v.getIsActive(), images);
+	}
+
+	private AdminProductDto toDto(Product p) {
+		Brand brand = p.getBrand();
+		List<AdminVariantDto> variants = p.getVariants() == null ? List.of()
 				: p.getVariants().stream().sorted(Comparator
-						.comparing(ProductVariant::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+						.comparing(ProductVariant::getColor,
+								Comparator.nullsLast(String::compareToIgnoreCase)))
 						.map(this::toVariantDto).toList();
 		List<String> categories = p.getCategories() == null ? List.of()
 				: p.getCategories().stream().map(Category::getName).sorted().toList();
 
 		return new AdminProductDto(p.getId(), p.getName(),
 				brand != null ? brand.getId() : null, brand != null ? brand.getName() : null,
-				p.getBasePrice(), p.getDiscountPercentage(), p.getMaterial(), p.getShape(),
-				p.getDescription(), p.getTaxRate(), p.getProductType(), p.getIsActive(),
-				p.getCreatedAt(), p.getUpdatedAt(), categories, images, variants);
+				p.getMaterial(), p.getShape(),
+				p.getDescription(), p.getTaxRate(), p.getProductType(),
+				p.getCreatedAt(), p.getUpdatedAt(), categories, variants);
 	}
 }

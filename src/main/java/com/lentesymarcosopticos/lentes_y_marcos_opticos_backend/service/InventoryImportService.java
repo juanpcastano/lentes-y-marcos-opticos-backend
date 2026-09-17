@@ -116,7 +116,7 @@ public class InventoryImportService {
 								created++;
 							} else {
 								product.setName(row.name().trim());
-								product.setBasePrice(row.basePrice());
+								variantPrice(product, row.sku()).ifPresent(v -> v.setPrice(row.basePrice()));
 								updated++;
 							}
 						}
@@ -127,7 +127,7 @@ public class InventoryImportService {
 								created++;
 							} else {
 								product.setName(row.name().trim());
-								product.setBasePrice(row.basePrice());
+								variantPrice(product, row.sku()).ifPresent(v -> v.setPrice(row.basePrice()));
 								product.setProductType(row.productType());
 								product.setBrand(getOrCreateBrand(row.brand(), brands));
 								product.setCategories(new HashSet<>(
@@ -178,19 +178,27 @@ public class InventoryImportService {
 			Map<String, Category> categories) {
 		Product product = new Product();
 		product.setName(row.name().trim());
-		product.setBasePrice(row.basePrice());
 		product.setProductType(row.productType());
 		product.setBrand(getOrCreateBrand(row.brand(), brands));
 		product.setCategories(new HashSet<>(getOrCreateCategories(row.categories(), categories)));
-		product.setIsActive(true);
 		Product saved = productRepository.save(product);
 		ProductVariant variant = new ProductVariant();
 		variant.setProduct(saved);
-		variant.setVariantName("Único");
+		variant.setColor("ÚNICO");
 		variant.setSku(row.sku());
+		variant.setPrice(row.basePrice());
 		variant.setIsActive(true);
 		saved.getVariants().add(variant);
 		productRepository.saveAndFlush(saved);
+	}
+
+	private java.util.Optional<ProductVariant> variantPrice(Product product, String sku) {
+		if (product.getVariants() == null) {
+			return java.util.Optional.empty();
+		}
+		return product.getVariants().stream()
+				.filter(v -> sku.equals(v.getSku()))
+				.findFirst();
 	}
 
 	private Brand getOrCreateBrand(String name, Map<String, Brand> cache) {

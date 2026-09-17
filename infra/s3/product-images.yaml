@@ -52,7 +52,7 @@ Resources:
             Principal: "*"
             Action: s3:GetObject
             Resource:
-              - !Sub "arn:${AWS::Partition}:s3:::${ProductImagesBucket}/products/*"
+              - !Sub "arn:${AWS::Partition}:s3:::${ProductImagesBucket}/variants/*"
               - !Sub "arn:${AWS::Partition}:s3:::${ProductImagesBucket}/categories/*"
               - !Sub "arn:${AWS::Partition}:s3:::${ProductImagesBucket}/brands/*"
               - !Sub "arn:${AWS::Partition}:s3:::${ProductImagesBucket}/hero/*"

@@ -7,8 +7,10 @@ import java.util.UUID;
  */
 public record VariantDto(
 		UUID id,
-		String variantName,
+		String color,
 		String sku,
-		String imageUrl,
+		Integer price,
+		Integer discountPercentage,
+		Integer discountedPrice,
 		Boolean isActive) {
 }

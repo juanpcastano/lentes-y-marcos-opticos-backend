@@ -1,6 +1,6 @@
 # Bucket de imágenes
 
-El backend escribe imágenes usando las credenciales por defecto del AWS SDK. Los productos usan `products/{productId}/{uuid}.{ext}` y las imágenes de catálogo usan `categories/{uuid}.{ext}` o `brands/{uuid}.{ext}`. El hero de la página principal usa `hero/{uuid}.{ext}`. El bucket no permite escritura pública; solo esos cuatro prefijos son públicos para que la tienda pueda mostrar las imágenes mediante URL directa.
+El backend escribe imágenes usando las credenciales por defecto del AWS SDK. Las variantes usan `variants/{variantId}/{uuid}.{ext}` y las imágenes de catálogo usan `categories/{uuid}.{ext}` o `brands/{uuid}.{ext}`. El hero de la página principal usa `hero/{uuid}.{ext}`. El bucket no permite escritura pública; solo esos prefijos son públicos para que la tienda pueda mostrar las imágenes mediante URL directa.
 
 ## Crear el bucket
 
@@ -32,7 +32,7 @@ Adjuntar al rol IAM que ejecuta Spring Boot una política con alcance únicament
       "Resource": "arn:aws:s3:::lentesymarcosopticos-images-bucket",
       "Condition": {
         "StringLike": {
-          "s3:prefix": ["products/*", "categories/*", "brands/*", "hero/*"]
+          "s3:prefix": ["variants/*", "categories/*", "brands/*", "hero/*"]
         }
       }
     },
@@ -40,7 +40,7 @@ Adjuntar al rol IAM que ejecuta Spring Boot una política con alcance únicament
       "Effect": "Allow",
       "Action": ["s3:PutObject", "s3:DeleteObject"],
       "Resource": [
-        "arn:aws:s3:::lentesymarcosopticos-images-bucket/products/*",
+        "arn:aws:s3:::lentesymarcosopticos-images-bucket/variants/*",
         "arn:aws:s3:::lentesymarcosopticos-images-bucket/categories/*",
         "arn:aws:s3:::lentesymarcosopticos-images-bucket/brands/*",
         "arn:aws:s3:::lentesymarcosopticos-images-bucket/hero/*"
@@ -52,7 +52,7 @@ Adjuntar al rol IAM que ejecuta Spring Boot una política con alcance únicament
 
 No se deben configurar `AWS_ACCESS_KEY_ID` ni `AWS_SECRET_ACCESS_KEY` en el servidor si se usa un rol IAM de EC2/ECS. En local, el SDK toma el perfil configurado por AWS CLI.
 
-El backend usa `s3:ListBucket` para mostrar en el panel las imágenes existentes de `products/` (galería y selector de imágenes existentes del formulario de producto), `categories/`, `brands/` y `hero/`. La subida y eliminación requieren permisos sobre objetos del bucket.
+El backend usa `s3:ListBucket` para mostrar en el panel las imágenes existentes de `variants/` (galería y selector de imágenes existentes del formulario de variante), `categories/`, `brands/` y `hero/`. La subida y eliminación requieren permisos sobre objetos del bucket.
 
 ## Variables del backend
 

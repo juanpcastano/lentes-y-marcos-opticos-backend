@@ -16,22 +16,22 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * ProductImage
+ * VariantImage — foto de una variante (color). La primera en orden es la
+ * primaria que se muestra en el catálogo.
  */
-
 @Entity
-@Table(name = "product_images")
+@Table(name = "variant_images")
 @NoArgsConstructor
 @Getter
 @Setter
-public class ProductImage {
+public class VariantImage {
 	@Id
 	@GeneratedValue(strategy = GenerationType.UUID)
 	private UUID id;
 
 	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "product_id", nullable = false)
-	private Product product;
+	@JoinColumn(name = "variant_id", nullable = false)
+	private ProductVariant variant;
 
 	@Column(nullable = false)
 	private String imageUrl;

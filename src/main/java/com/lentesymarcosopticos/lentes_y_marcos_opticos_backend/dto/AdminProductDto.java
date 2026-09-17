@@ -6,24 +6,32 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * AdminProductDto — producto completo para el panel de administración
+ * AdminProductDto — producto completo para el panel de administración.
+ * Las variantes incluyen sus imágenes.
  */
 public record AdminProductDto(
 		UUID id,
 		String name,
 		UUID brandId,
 		String brand,
-		Integer basePrice,
-		Integer discountPercentage,
 		String material,
 		String shape,
 		String description,
 		BigDecimal taxRate,
 		String productType,
-		Boolean isActive,
 		LocalDateTime createdAt,
 		LocalDateTime updatedAt,
 		List<String> categories,
-		List<ProductImageDto> images,
-		List<VariantDto> variants) {
+		List<AdminVariantDto> variants) {
+
+	public record AdminVariantDto(
+			UUID id,
+			String color,
+			String sku,
+			Integer price,
+			Integer discountPercentage,
+			Integer discountedPrice,
+			Boolean isActive,
+			List<ProductImageDto> images) {
+	}
 }
