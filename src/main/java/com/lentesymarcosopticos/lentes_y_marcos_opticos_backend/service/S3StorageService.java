@@ -1,10 +1,23 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service;
 
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.Map;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.MemoryCacheImageOutputStream;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -25,15 +38,26 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 /**
  * S3StorageService — subidas de imágenes de producto a AWS S3.
  * Desactivado si aws.s3.bucket está vacío (503 al intentar subir).
+ *
+ * <p>
+ * Cada subida se normaliza antes de guardarse y el original se descarta:
+ * resize al ancho máximo según carpeta y encode a WebP. Un solo archivo
+ * por imagen, sin miniaturas ni duplicados en la galería.
  */
 @Service
 @Slf4j
 public class S3StorageService implements StorageService {
 
-	private static final Map<String, String> EXT_BY_CONTENT_TYPE = Map.of(
-			"image/jpeg", "jpg",
-			"image/png", "png",
-			"image/webp", "webp");
+	private static final Set<String> SUPPORTED_CONTENT_TYPES = Set.of(
+			"image/jpeg", "image/png", "image/webp");
+
+	/** Hero full-bleed: cubre 1920px a DPR 1x (ver hero-slide). */
+	private static final int HERO_MAX_WIDTH = 1920;
+	/** Cards y resto: se muestran a ~300-600px CSS. */
+	private static final int DEFAULT_MAX_WIDTH = 1280;
+	private static final float WEBP_QUALITY = 0.8f;
+	/** Tope de decodificación (~40MP ≈ 160MB en RAM): evita OOM. */
+	private static final long MAX_PIXELS = 40_000_000L;
 
 	private final String bucket;
 	private final String region;
@@ -75,27 +99,145 @@ public class S3StorageService implements StorageService {
 			throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
 					"Storage no configurado (aws.s3.bucket)");
 		}
-		String contentType = file.getContentType();
-		String ext = contentType == null ? null : EXT_BY_CONTENT_TYPE.get(contentType.toLowerCase());
-		if (ext == null) {
+		String contentType = file.getContentType() == null ? ""
+				: file.getContentType().toLowerCase();
+		if (!SUPPORTED_CONTENT_TYPES.contains(contentType)) {
 			throw new ApiException(HttpStatus.BAD_REQUEST,
 					"Formato no soportado (jpg, png, webp)");
 		}
-		String key = folder + "/" + UUID.randomUUID() + "." + ext;
 		byte[] bytes;
 		try {
 			bytes = file.getBytes();
 		} catch (java.io.IOException e) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "No se pudo leer el archivo");
 		}
+		byte[] optimized = optimize(bytes, maxWidth(folder));
+		// Clave única por subida: el objeto es inmutable y cacheable por un año.
+		String key = folder + "/" + UUID.randomUUID() + ".webp";
 		client.putObject(
 				PutObjectRequest.builder()
 						.bucket(bucket)
 						.key(key)
-						.contentType(contentType)
+						.contentType("image/webp")
+						.cacheControl("public, max-age=31536000, immutable")
+						.contentLength((long) optimized.length)
 						.build(),
-				RequestBody.fromBytes(bytes));
+				RequestBody.fromBytes(optimized));
 		return publicUrlBase.isEmpty() ? defaultUrl(key) : publicUrlBase + "/" + key;
+	}
+
+	private static int maxWidth(String folder) {
+		return folder != null && (folder.equals("hero") || folder.startsWith("hero/"))
+				? HERO_MAX_WIDTH
+				: DEFAULT_MAX_WIDTH;
+	}
+
+	/**
+	 * Decodifica, reduce al ancho máximo (sin ampliar) y codifica a WebP.
+	 * El original se descarta: una 4000px de celular (~3MB) queda en ~100KB.
+	 */
+	static byte[] optimize(byte[] bytes, int maxWidth) {
+		BufferedImage src;
+		try {
+			src = ImageIO.read(new ByteArrayInputStream(bytes));
+		} catch (IOException e) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "No se pudo leer la imagen");
+		}
+		if (src == null) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "No se pudo leer la imagen");
+		}
+		if ((long) src.getWidth() * src.getHeight() > MAX_PIXELS) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "La imagen es demasiado grande");
+		}
+		BufferedImage scaled = src.getWidth() > maxWidth
+				? scaleDown(src, maxWidth)
+				: toSafeType(src);
+		return encodeWebp(scaled);
+	}
+
+	/** Reducción por pasos (bilineal progresiva): menos aliasing que un solo paso. */
+	private static BufferedImage scaleDown(BufferedImage src, int targetWidth) {
+		int type = src.getColorModel().hasAlpha()
+				? BufferedImage.TYPE_INT_ARGB
+				: BufferedImage.TYPE_INT_RGB;
+		BufferedImage current = toType(src, type);
+		int currentWidth = current.getWidth();
+		while (currentWidth / 2 >= targetWidth && currentWidth / 2 >= 1) {
+			currentWidth /= 2;
+			int h = Math.max(1, current.getHeight() * currentWidth / src.getWidth());
+			current = drawScaled(current, currentWidth, h, type);
+		}
+		if (currentWidth != targetWidth) {
+			int h = Math.max(1, src.getHeight() * targetWidth / src.getWidth());
+			current = drawScaled(current, targetWidth, h, type);
+		}
+		return current;
+	}
+
+	private static BufferedImage drawScaled(BufferedImage src, int w, int h, int type) {
+		BufferedImage out = new BufferedImage(w, h, type);
+		Graphics2D g = out.createGraphics();
+		try {
+			g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+					RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+			g.setRenderingHint(RenderingHints.KEY_RENDERING,
+					RenderingHints.VALUE_RENDER_QUALITY);
+			g.drawImage(src, 0, 0, w, h, null);
+		} finally {
+			g.dispose();
+		}
+		return out;
+	}
+
+	/** Tipos exóticos (paleta, CMYK, custom) a RGB/ARGB para el encoder. */
+	private static BufferedImage toSafeType(BufferedImage src) {
+		int type = src.getColorModel().hasAlpha()
+				? BufferedImage.TYPE_INT_ARGB
+				: BufferedImage.TYPE_INT_RGB;
+		if (src.getType() == type) return src;
+		return toType(src, type);
+	}
+
+	private static BufferedImage toType(BufferedImage src, int type) {
+		if (src.getType() == type) return src;
+		BufferedImage out = new BufferedImage(src.getWidth(), src.getHeight(), type);
+		Graphics2D g = out.createGraphics();
+		try {
+			g.drawImage(src, 0, 0, null);
+		} finally {
+			g.dispose();
+		}
+		return out;
+	}
+
+	private static byte[] encodeWebp(BufferedImage image) {
+		Iterator<ImageWriter> writers = ImageIO.getImageWritersByMIMEType("image/webp");
+		if (!writers.hasNext()) {
+			throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR,
+					"Codificador WebP no disponible");
+		}
+		ImageWriter writer = writers.next();
+		try (ByteArrayOutputStream out = new ByteArrayOutputStream();
+				MemoryCacheImageOutputStream ios = new MemoryCacheImageOutputStream(out)) {
+			writer.setOutput(ios);
+			ImageWriteParam param = writer.getDefaultWriteParam();
+			if (param.canWriteCompressed()) {
+				param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+				String[] types = param.getCompressionTypes();
+				if (types != null && types.length > 0) {
+					// "Lossy" en webp-imageio; si cambia, el primero sigue válido.
+					param.setCompressionType(types[0]);
+				}
+				param.setCompressionQuality(WEBP_QUALITY);
+			}
+			writer.write(null, new IIOImage(image, null, null), param);
+			ios.flush();
+			return out.toByteArray();
+		} catch (IOException e) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "No se pudo procesar la imagen");
+		} finally {
+			writer.dispose();
+		}
 	}
 
 	@Override
