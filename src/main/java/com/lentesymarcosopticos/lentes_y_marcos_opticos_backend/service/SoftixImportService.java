@@ -267,10 +267,10 @@ public class SoftixImportService {
 		ColorSplit split = splitColor(base.name());
 		String groupKey = "B:" + normalize(base.brand()) + "|P:" + fuzzyKey(split.productName());
 		if (signatures.size() == 1) {
+			// Mismo SKU en varias sedes con los mismos datos: Softix lleva un
+			// inventario por sede, así que es el mismo producto en varias
+			// ubicaciones. Se fusiona en silencio, sin bloqueos ni avisos.
 			String note = join(skippedNote,
-					valid.size() > 1 ? "Repetido en " + sheets
-							+ " con los mismos datos: se importa una vez" : null);
-			note = join(note,
 					base.unitPrice() == null
 							? "Sin precio en el Excel: ponlo a mano en el paso de productos"
 							: null);
@@ -436,12 +436,99 @@ public class SoftixImportService {
 			"GUNMETAL", "GREY", "GRAY", "BLACK", "BLUE", "GREEN", "BROWN",
 			"PINK", "RED", "WHITE", "SILVER", "GOLD", "TORTOISE",
 			"HAVANA", "CRISTAL", "HUMO", "PETROLEO", "PETRÓLEO", "BURDEOS",
-			"BORDO", "LAVANDA", "UVA", "MENTA", "AQUA", "CAMEL", "COGNAC", "TABACO");
+			"BORDO", "LAVANDA", "UVA", "MENTA", "AQUA", "CAMEL", "COGNAC", "TABACO",
+			// Neutros y blancos
+			"NEUTRO", "NEUTRA", "NEUTRAL", "MARFIL", "PERLA", "PEARL",
+			"MADREPERLA", "CREAM", "ECRU", "IVORY", "SNOW", "BONE", "CHALK",
+			"CLOUD", "NIEVE", "HIELO",
+			// Grises y metales fríos
+			"ACERO", "STEEL", "TITANIO", "TITANIUM", "NIQUEL", "NÍQUEL", "NICKEL",
+			"CROMO", "CHROME", "ANTRACITA", "ANTHRACITE", "GRAFITO", "GRAPHITE",
+			"PIZARRA", "SLATE", "CENIZA", "ASH", "SMOKE", "FOG", "MIST", "STORM",
+			"PLATINUM", "PEWTER", "STONE",
+			// Dorados y cobrizos
+			"ORO", "GOLDEN", "BRONCE", "BRONZE", "COBRE", "COPPER",
+			"CHAMPAGNE", "CHAMPAN", "CHAMPÁN", "LATON", "LATÓN", "BRASS",
+			// Beige y tierras
+			"LINO", "LINEN", "CANVAS", "OATMEAL", "TAUPE", "GREIGE",
+			"SAND", "DUNE", "DESERT", "AVELLANA", "NUEZ",
+			"CASTAÑO", "CASTAÑA", "CHESTNUT", "CAOBA", "NOGAL", "ROBLE",
+			"TEJA", "LADRILLO", "ARCILLA", "ADOBE", "SIENA", "SIENNA",
+			"OCRE", "OCHRE", "SEPIA", "CORCHO", "PAJA", "TRIGO",
+			"BAMBU", "BAMBÚ", "PIEDRA",
+			// Cafés
+			"AMBAR", "ÁMBAR", "AMBER", "CANELA", "CARAMELO", "CARAMEL",
+			"MOCHA", "MOKA", "CAPUCHINO", "CAPUCCINO", "EXPRESO", "EXPRESSO",
+			"ESPRESSO", "TOFFEE", "FUDGE", "BROWNIE", "COCOA", "CACAO",
+			"COFFEE", "WHISKEY", "WHISKY", "BRANDY", "TAMARINDO", "MAMEY",
+			"ZAPOTE",
+			// Rojos y vinos
+			"GRANATE", "GARNET", "CEREZA", "CHERRY", "GUINDA", "CARMIN", "CARMÍN",
+			"CARMESI", "CARMESÍ", "ESCARLATA", "SCARLET", "CRIMSON", "MAROON",
+			"GRANADA", "POMEGRANATE", "VINO", "WINE", "TINTO", "RIOJA", "MALBEC",
+			"MERLOT", "CABERNET", "BORGOÑA", "BORDEAUX", "OPORTO", "JEREZ",
+			"CAVA", "SANGRIA", "SANGRÍA", "RUST", "FLAME", "BLAZE", "EMBER",
+			// Rosas
+			"SALMON", "SALMÓN", "MAGENTA", "FRAMBUESA", "RASPBERRY", "FRESA",
+			"STRAWBERRY", "BLUSH", "NUDE", "ROSE", "ROSÉ", "OROROSA", "PALOROSA",
+			"CRANBERRY", "RUBOR",
+			// Naranjas
+			"ORANGE", "TANGERINE", "MANDARINA", "CALABAZA", "MELOCOTON",
+			"MELOCOTÓN", "ALBARICOQUE", "APRICOT", "PEACH", "DURAZNO",
+			"SUNSET", "AURORA",
+			// Amarillos
+			"YELLOW", "MOSTAZA", "MUSTARD", "MAIZ", "MAÍZ", "LIMON", "LIMÓN",
+			"LEMON", "VAINILLA", "VANILLA", "HONEY", "HAZEL",
+			// Verdes
+			"ESMERALDA", "EMERALD", "JADE", "MUSGO", "MOSS",
+			"PISTACHO", "PISTACHE", "PISTACHIO", "AGUACATE", "MINT",
+			"SAGE", "FOREST", "OLIVE", "LIME", "KHAKI", "CAQUI", "KAKI",
+			"TEAL", "PETROL", "TURQUOISE",
+			// Azules
+			"MARINO", "NAVY", "INDIGO", "ÍNDIGO", "CIELO", "SKY",
+			"VAQUERO", "AÑIL", "INK", "MIDNIGHT", "COBALT", "SAPPHIRE",
+			"ZAFIRO",
+			// Morados
+			"PURPURA", "PÚRPURA", "PURPLE", "MALVA", "MAUVE", "CIRUELA", "PLUM",
+			"LAVENDER", "AMATISTA", "AMETHYST", "BERENJENA",
+			"EGGPLANT", "ORQUIDEA", "ORQUÍDEA", "ORCHID", "MAGNOLIA", "JASMINE",
+			"JAZMIN", "JAZMÍN", "IRIS", "AZAHAR",
+			// Frutas y flores verdes/amarillas
+			"KIWI", "PAPAYA", "GUAYABA", "GUAVA", "ARANDANO",
+			"ARÁNDANO", "BLUEBERRY", "MORA", "BLACKBERRY", "AMAPOLA", "PEONY",
+			"BLOSSOM",
+			// Gemas y minerales
+			"CUARZO", "QUARTZ", "TOPACIO", "TOPAZ", "RUBI", "RUBÍ", "RUBY",
+			"ONICE", "ÓNICE", "ONIX", "ÓNIX", "ONYX", "AGATA", "ÁGATA",
+			"EBANO", "ÉBANO", "EBONY", "JASPE", "JASPER", "AQUAMARINE",
+			"CITRINE",
+			// Estampados animales
+			"CEBRA", "ZEBRA", "TIGRE", "TIGER", "LEOPARDO", "LEOPARD",
+			"JIRAFA", "GIRAFFE", "JAGUAR", "PANTERA", "PANTHER", "CHEETAH",
+			"SERPIENTE", "SNAKE", "PYTHON", "COCODRILO", "CROCODILE", "CROCO",
+			"TORTUGA", "DALMATA", "DALMATIAN",
+			// Militares y utilitarios
+			"CAMUFLADO", "CAMUFLAJE", "CAMO", "DENIM",
+			// Acabados que funcionan como color
+			"NACAR", "NÁCAR", "NACARADO", "NACARADA", "MÁRMOL", "MARMOL",
+			"MARBLE", "TORNASOL", "IRIDESCENT", "OPAL", "ÓPALO", "GLITTER",
+			"METALLIC", "METALICO", "METÁLICO", "NEON", "NEÓN");
 
 	/** Segundas palabras válidas de un color compuesto ("AZUL OSCURO"). */
 	private static final Set<String> COMPOUND_TAILS = Set.of(
 			"OSCURO", "OSCURA", "OSCUROS", "OSCURAS", "CLARO", "CLARA",
-			"CLAROS", "CLARAS", "MATE", "BRILLANTE", "PASTEL", "ELECTRICO", "ELÉCTRICO");
+			"CLAROS", "CLARAS", "MATE", "MATTE", "LIGHT", "DARK", "BRILLANTE", "PASTEL", "ELECTRICO", "ELÉCTRICO",
+			"INTENSO", "INTENSA", "INTENSOS", "INTENSAS", "PLOMO",
+			"DEGRADADO", "DEGRADADA", "DEGRADE", "DEGRADÉ",
+			"ESPEJADO", "ESPEJADA", "SATINADO", "SATINADA", "SATIN",
+			"PERLADO", "PERLADA", "AHUMADO", "AHUMADA",
+			"TRASLUCIDO", "TRASLUCIDA", "TRASLUCIDOS", "TRASLUCIDAS",
+			"TRANSPARENTE", "TRANSPARENTES", "TRASPARENTE",
+			"FLUOR", "FLUORESCENTE", "TINTO");
+
+	/** Modificadores que van antes del color base ("MATTE LIGHT GUNMETAL"). */
+	private static final Set<String> LEADING_MODIFIERS = Set.of(
+			"MATTE", "MATT", "LIGHT", "DARK");
 
 	private ColorSplit splitColor(String description) {
 		if (description == null || description.isBlank()) {
@@ -462,6 +549,31 @@ public class SoftixImportService {
 				String color = capitalize(tokens[tokens.length - 2]) + " " + capitalize(tokens[tokens.length - 1]);
 				return new ColorSplit(joinTokens(tokens, tokens.length - 2), color, false);
 			}
+		}
+		// "PALO ROSA" / "PALO DE ROSA" (palo de rosa): el calificador va
+		// antes del color, al revés que las colas compuestas.
+		if ("ROSA".equals(last) && tokens.length >= 3
+				&& "PALO".equals(normalize(tokens[tokens.length - 2]))) {
+			return new ColorSplit(joinTokens(tokens, tokens.length - 2), "Palo Rosa", false);
+		}
+		if ("ROSA".equals(last) && tokens.length >= 4
+				&& "DE".equals(normalize(tokens[tokens.length - 2]))
+				&& "PALO".equals(normalize(tokens[tokens.length - 3]))) {
+			return new ColorSplit(joinTokens(tokens, tokens.length - 3), "Palo de Rosa",
+					false);
+		}
+		// Modificador antes de la base ("MATTE LIGHT GUNMETAL", "LIGHT BLUE"):
+		// la última es el color base y las previas son acabado/intensidad.
+		if (KNOWN_COLORS.contains(last) && tokens.length >= 3
+				&& LEADING_MODIFIERS.contains(normalize(tokens[tokens.length - 2]))) {
+			if (tokens.length >= 4
+					&& LEADING_MODIFIERS.contains(normalize(tokens[tokens.length - 3]))) {
+				String color = capitalize(tokens[tokens.length - 3]) + " "
+						+ capitalize(tokens[tokens.length - 2]) + " " + capitalize(tokens[tokens.length - 1]);
+				return new ColorSplit(joinTokens(tokens, tokens.length - 3), color, false);
+			}
+			String color = capitalize(tokens[tokens.length - 2]) + " " + capitalize(tokens[tokens.length - 1]);
+			return new ColorSplit(joinTokens(tokens, tokens.length - 2), color, false);
 		}
 		if (KNOWN_COLORS.contains(last)) {
 			return new ColorSplit(joinTokens(tokens, tokens.length - 1),
