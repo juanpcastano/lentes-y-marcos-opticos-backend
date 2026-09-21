@@ -1,11 +1,13 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service;
 
 import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
+import java.util.HashSet;import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -16,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.InventoryConfirmResponse;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.InventoryImportPlanRequest;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.InventoryPreviewResponse;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.InventoryPreviewRowDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.Brand;
@@ -96,6 +99,12 @@ public class InventoryImportService {
 				case "ERROR" -> skipped.add("SKU " + row.sku() + ": " + row.detail());
 				case "SIN_CAMBIOS" -> unchanged++;
 				default -> {
+					if (row.basePrice() == null) {
+						// Sin precio en el Excel: solo el wizard permite ponerlo
+						// a mano (su validación lo exige). La ruta legacy lo omite.
+						skipped.add("SKU " + row.sku()
+								+ ": sin precio en el Excel (ponlo en el wizard de importación)");
+					} else {
 					String decision = normalized.getOrDefault(row.rowKey(),
 							"NUEVO".equals(row.status()) ? "CREATE" : "UPDATE");
 					switch (decision) {
@@ -137,6 +146,7 @@ public class InventoryImportService {
 						}
 						default -> violations.put(row.rowKey(), "Decisión no válida: " + decision);
 					}
+					}
 				}
 			}
 		}
@@ -148,6 +158,323 @@ public class InventoryImportService {
 	}
 
 	// ---------- helpers ----------
+
+	/**
+	 * Aplica el plan curado del wizard (marcas, categorías y productos ya
+	 * decididos en el frontend). Valida todo antes de persistir: si hay
+	 * violaciones responde 422 sin aplicar nada.
+	 */
+	@Transactional
+	public InventoryConfirmResponse confirmPlan(InventoryImportPlanRequest plan) {
+		if (plan == null || plan.products() == null || plan.products().isEmpty()) {
+			throw new ApiException(HttpStatus.BAD_REQUEST,
+					"El plan no contiene productos para importar");
+		}
+		Map<String, String> violations = new LinkedHashMap<>();
+
+		// ---- marcas ----
+		Map<String, Brand> brandsByRaw = new LinkedHashMap<>();
+		if (plan.brands() != null) {
+			for (var mapping : plan.brands()) {
+				String raw = mapping == null ? null : trimOrNull(mapping.rawName());
+				if (raw == null) {
+					continue;
+				}
+				String key = SoftixImportService.normalize(raw);
+				String action = mapping.action() == null ? ""
+						: mapping.action().trim().toUpperCase(Locale.ROOT);
+				switch (action) {
+					case "OMIT" -> {
+					}
+					case "MAP" -> {
+						if (mapping.brandId() == null) {
+							violations.put("brand:" + raw, "Sin marca de destino para \"" + raw + "\"");
+						} else {
+							Brand brand = brandRepository.findById(mapping.brandId()).orElse(null);
+							if (brand == null) {
+								violations.put("brand:" + raw,
+										"La marca de destino ya no existe (\"" + raw + "\")");
+							} else {
+								brandsByRaw.put(key, brand);
+							}
+						}
+					}
+					case "CREATE" -> {
+						String finalName = trimOrNull(mapping.finalName());
+						if (finalName == null) {
+							violations.put("brand:" + raw, "Sin nombre final para \"" + raw + "\"");
+						} else {
+							brandsByRaw.put(key, getOrCreateBrand(finalName, brandCache()));
+						}
+					}
+					default -> violations.put("brand:" + raw,
+							"Acción no válida para la marca \"" + raw + "\": " + mapping.action());
+				}
+			}
+		}
+
+		// ---- categorías ----
+		Map<String, Category> categoriesByRaw = new LinkedHashMap<>();
+		if (plan.categories() != null) {
+			for (var mapping : plan.categories()) {
+				String raw = mapping == null ? null : trimOrNull(mapping.rawName());
+				if (raw == null) {
+					continue;
+				}
+				String key = SoftixImportService.normalize(raw);
+				String action = mapping.action() == null ? ""
+						: mapping.action().trim().toUpperCase(Locale.ROOT);
+				switch (action) {
+					case "OMIT" -> {
+					}
+					case "MAP" -> {
+						if (mapping.categoryId() == null) {
+							violations.put("category:" + raw,
+									"Sin categoría de destino para \"" + raw + "\"");
+						} else {
+							Category category = categoryRepository.findById(mapping.categoryId())
+									.orElse(null);
+							if (category == null) {
+								violations.put("category:" + raw,
+										"La categoría de destino ya no existe (\"" + raw + "\")");
+							} else {
+								categoriesByRaw.put(key, category);
+							}
+						}
+					}
+					case "CREATE" -> {
+						String finalName = trimOrNull(mapping.finalName());
+						if (finalName == null) {
+							violations.put("category:" + raw,
+									"Sin nombre final para \"" + raw + "\"");
+						} else {
+							categoriesByRaw.put(key, getOrCreateCategory(finalName, categoryCache()));
+						}
+					}
+					default -> violations.put("category:" + raw,
+							"Acción no válida para la categoría \"" + raw + "\": " + mapping.action());
+				}
+			}
+		}
+
+		// ---- productos (validación, sin persistir) ----
+		Set<String> seenSkus = new HashSet<>();
+		int index = 0;
+		for (var product : plan.products()) {
+			index++;
+			String ref = "products[" + index + "]";
+			if (product == null) {
+				violations.put(ref, "Producto vacío");
+				continue;
+			}
+			if (trimOrNull(product.name()) == null) {
+				violations.put(ref, "Producto sin nombre");
+			}
+			Brand brand = product.brandRaw() == null ? null
+					: brandsByRaw.get(SoftixImportService.normalize(product.brandRaw()));
+			if (brand == null) {
+				violations.put(ref,
+						"La marca \"" + product.brandRaw() + "\" está omitida o sin mapear");
+			}
+			if (product.variants() == null || product.variants().stream()
+					.noneMatch(v -> v != null && !"DISCARD".equals(normMode(v.mode())))) {
+				violations.put(ref, "El producto \"" + product.name() + "\" no tiene variantes a importar");
+			}
+			if (product.existingProductId() != null
+					&& !productRepository.existsById(product.existingProductId())) {
+				violations.put(ref, "El producto existente enlazado ya no existe");
+			}
+			if (product.variants() != null) {
+				Set<String> colors = new HashSet<>();
+				for (var variant : product.variants()) {
+					if (variant == null) {
+						continue;
+					}
+					String mode = normMode(variant.mode());
+					if ("DISCARD".equals(mode)) {
+						continue;
+					}
+					if (!Set.of("CREATE", "UPDATE", "REPLACE").contains(mode)) {
+						violations.put("sku:" + variant.sku(), "Modo no válido: " + variant.mode());
+						continue;
+					}
+					String sku = trimOrNull(variant.sku());
+					if (sku == null) {
+						violations.put(ref, "Variante sin SKU en \"" + product.name() + "\"");
+						continue;
+					}
+					if (!seenSkus.add(sku)) {
+						violations.put("sku:" + sku, "SKU duplicado en el plan");
+						continue;
+					}
+					String color = trimOrNull(variant.color());
+					if (color == null) {
+						violations.put("sku:" + sku, "Variante sin color");
+					} else if (!colors.add(color.toLowerCase(Locale.ROOT))) {
+						violations.put("sku:" + sku,
+								"Color duplicado en el producto \"" + product.name() + "\": " + color);
+					}
+					if (variant.price() == null || variant.price() <= 0) {
+						violations.put("sku:" + sku, "Precio no válido");
+					}
+				}
+			}
+		}
+		if (!violations.isEmpty()) {
+			throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+					"El plan tiene errores: revísalos antes de importar", violations);
+		}
+
+		// ---- aplicar ----
+		Map<String, ProductVariant> variantsBySku = variantRepository
+				.findBySkuIn(seenSkus.stream().toList()).stream()
+				.collect(Collectors.toMap(ProductVariant::getSku, Function.identity(),
+						(a, b) -> a, LinkedHashMap::new));
+		Map<UUID, Product> productsById = new LinkedHashMap<>();
+
+		int created = 0, updated = 0, discarded = 0, unchanged = 0;
+		Set<UUID> touchedProducts = new HashSet<>();
+		for (var planned : plan.products()) {
+			Brand brand = brandsByRaw
+					.get(SoftixImportService.normalize(planned.brandRaw()));
+			List<Category> categories = planned.categoryRaws() == null ? List.of()
+					: planned.categoryRaws().stream()
+							.map(raw -> categoriesByRaw.get(SoftixImportService.normalize(raw)))
+							.filter(Objects::nonNull)
+							.distinct()
+							.toList();
+
+			Product target;
+			boolean productChanged;
+			if (planned.existingProductId() != null) {
+				target = productsById.computeIfAbsent(planned.existingProductId(),
+						id -> productRepository.findDetailById(id).orElseThrow());
+				String newName = planned.name().trim();
+				// Las categorías se suman a las que ya tiene el producto: el
+				// Excel agrega, nunca quita.
+				Set<Category> merged = new LinkedHashSet<>(
+						target.getCategories() == null ? Set.of() : target.getCategories());
+				merged.addAll(categories);
+				productChanged = !Objects.equals(target.getName(), newName)
+						|| target.getBrand() == null
+						|| !target.getBrand().getId().equals(brand.getId())
+						|| !Objects.equals(target.getProductType(), planned.productType())
+						|| !categoryIds(target.getCategories()).equals(categoryIds(merged));
+				target.setName(newName);
+				target.setProductType(planned.productType());
+				target.setBrand(brand);
+				target.setCategories(new HashSet<>(merged));
+			} else {
+				target = new Product();
+				target.setName(planned.name().trim());
+				target.setProductType(planned.productType());
+				target.setBrand(brand);
+				target.setCategories(new HashSet<>(categories));
+				target = productRepository.save(target);
+				productsById.put(target.getId(), target);
+				productChanged = true;
+			}
+
+			for (var plannedVariant : planned.variants()) {
+				String mode = normMode(plannedVariant.mode());
+				if ("DISCARD".equals(mode)) {
+					discarded++;
+					continue;
+				}
+				String sku = plannedVariant.sku().trim();
+				String color = plannedVariant.color().trim();
+				ProductVariant variant = variantsBySku.get(sku);
+				if (variant == null) {
+					variant = new ProductVariant();
+					variant.setProduct(target);
+					variant.setSku(sku);
+					variant.setColor(color);
+					variant.setPrice(plannedVariant.price());
+					variant.setIsActive(true);
+					target.getVariants().add(variant);
+					variantsBySku.put(sku, variant);
+					created++;
+				} else {
+					boolean sameColor = variant.getColor() != null
+							&& variant.getColor().equalsIgnoreCase(color);
+					boolean samePrice = Objects.equals(variant.getPrice(), plannedVariant.price());
+					boolean sameProduct = variant.getProduct() != null
+							&& variant.getProduct().getId().equals(target.getId());
+					variant.setColor(color);
+					variant.setPrice(plannedVariant.price());
+					if (!sameProduct) {
+						if (variant.getProduct() != null) {
+							touchedProducts.add(variant.getProduct().getId());
+						}
+						variant.setProduct(target);
+						target.getVariants().add(variant);
+					}
+					if (!productChanged && sameColor && samePrice && sameProduct) {
+						unchanged++;
+					} else {
+						updated++;
+					}
+				}
+			}
+		}
+		productRepository.flush();
+		// Limpieza: los productos que perdieron variantes por fusiones y
+		// quedaron sin ninguna se eliminan (un producto sin variantes no es
+		// vendible ni visible). Solo toca productos afectados por este plan.
+		for (UUID productId : touchedProducts) {
+			if (productsById.containsKey(productId)) {
+				continue;
+			}
+			if (variantRepository.countByProductId(productId) == 0) {
+				productRepository.findById(productId).ifPresent(productRepository::delete);
+			}
+		}
+		return new InventoryConfirmResponse(created, updated, discarded, unchanged, List.of());
+	}
+
+	private String normMode(String mode) {
+		return mode == null ? "" : mode.trim().toUpperCase(Locale.ROOT);
+	}
+
+	private Set<UUID> categoryIds(java.util.Collection<Category> categories) {
+		if (categories == null) {
+			return Set.of();
+		}
+		return categories.stream().map(Category::getId).collect(Collectors.toSet());
+	}
+
+	private String trimOrNull(String value) {
+		if (value == null || value.isBlank()) {
+			return null;
+		}
+		return value.trim();
+	}
+
+	private Map<String, Brand> brandCache() {
+		return brandRepository.findAll().stream()
+				.collect(Collectors.toMap(b -> norm(b.getName()), Function.identity(),
+						(a, b) -> a, LinkedHashMap::new));
+	}
+
+	private Map<String, Category> categoryCache() {
+		return categoryRepository.findAll().stream()
+				.collect(Collectors.toMap(c -> norm(c.getName()), Function.identity(),
+						(a, b) -> a, LinkedHashMap::new));
+	}
+
+	private Category getOrCreateCategory(String name, Map<String, Category> cache) {
+		String key = norm(name);
+		Category existing = cache.get(key);
+		if (existing != null) {
+			return existing;
+		}
+		Category category = new Category();
+		category.setName(name.trim());
+		category.setIsFeatured(false);
+		Category saved = categoryRepository.save(category);
+		cache.put(key, saved);
+		return saved;
+	}
 
 	private Map<String, Product> loadProducts(List<InventoryPreviewRowDto> rows) {
 		List<String> skus = rows.stream()

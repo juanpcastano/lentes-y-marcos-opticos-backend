@@ -1,6 +1,5 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -53,9 +52,6 @@ public class Product {
 
 	@Column(columnDefinition = "TEXT")
 	private String description;
-
-	@Column
-	private BigDecimal taxRate;
 
 	@Column
 	private String productType;

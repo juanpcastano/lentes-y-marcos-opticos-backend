@@ -43,6 +43,7 @@ import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Order;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import lombok.AllArgsConstructor;
 
 /**
@@ -62,8 +63,8 @@ public class AdminProductService {
 	@Transactional(readOnly = true)
 	public PageResponse<AdminProductDto> list(String q, List<String> brands, List<String> categories,
 			List<String> materials, List<String> shapes, List<String> colors, Integer priceMin,
-			Integer priceMax, Boolean onSale, Boolean isNew, Boolean active, String sort, int page,
-			int size) {
+			Integer priceMax, Boolean onSale, Boolean isNew, Boolean active, Boolean needsReview,
+			String sort, int page, int size) {
 		Pageable pageable = PageRequest.of(page, size);
 		Page<Product> result = productRepository.findAll((root, query, cb) -> {
 			if (query.getResultType() != Long.class && query.getResultType() != long.class) {
@@ -110,6 +111,26 @@ public class AdminProductService {
 			if (categories != null && !categories.isEmpty()) {
 				predicate = cb.and(predicate,
 						ProductSpecifications.categoryIn(categories).toPredicate(root, query, cb));
+			}
+			if (needsReview != null && needsReview) {
+				Subquery<Long> variantSq = query.subquery(Long.class);
+				Root<ProductVariant> variant = variantSq.from(ProductVariant.class);
+				variantSq.select(cb.literal(1L));
+				variantSq.where(cb.and(
+						cb.equal(variant.get("product").get("id"), root.get("id")),
+						cb.or(
+								cb.equal(cb.lower(variant.get("color")), "varios"),
+								cb.isEmpty(variant.get("images")))));
+				predicate = cb.and(predicate, cb.or(
+						cb.isNull(root.get("productType")),
+						cb.equal(root.get("productType"), ""),
+						cb.isNull(root.get("material")),
+						cb.equal(root.get("material"), ""),
+						cb.isNull(root.get("shape")),
+						cb.equal(root.get("shape"), ""),
+						cb.isEmpty(root.get("categories")),
+						cb.isEmpty(root.get("variants")),
+						cb.exists(variantSq)));
 			}
 			return predicate;
 		}, pageable);
@@ -158,7 +179,6 @@ public class AdminProductService {
 		product.setMaterial(trimOrNull(request.material()));
 		product.setShape(trimOrNull(request.shape()));
 		product.setDescription(request.description());
-		product.setTaxRate(request.taxRate());
 		product.setProductType(request.productType().trim());
 		product.setBrand(resolveBrand(request.brandId()));
 		product.setCategories(new HashSet<>(resolveCategories(request.categories())));
@@ -197,9 +217,6 @@ public class AdminProductService {
 		if (request.description() != null) {
 			product.setDescription(request.description());
 		}
-		if (request.taxRate() != null) {
-			product.setTaxRate(request.taxRate());
-		}
 		if (request.productType() != null && !request.productType().isBlank()) {
 			product.setProductType(request.productType().trim());
 		}
@@ -229,6 +246,25 @@ public class AdminProductService {
 	public void deleteProduct(UUID id) {
 		Product product = loadDetail(id);
 		productRepository.delete(product);
+	}
+
+	/**
+	 * Activar/desactivar en lote: fija isActive en todas las variantes de los
+	 * productos indicados. Desactivar oculta el producto de la tienda sin
+	 * borrarlo.
+	 *
+	 * @return número de variantes actualizadas
+	 */
+	@Transactional
+	public int bulkSetVariantsActive(List<UUID> ids, boolean active) {
+		if (ids == null || ids.isEmpty()) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "Debes seleccionar al menos un producto");
+		}
+		List<UUID> distinct = ids.stream().filter(Objects::nonNull).distinct().toList();
+		if (distinct.isEmpty()) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "Debes seleccionar al menos un producto");
+		}
+		return variantRepository.updateActiveByProductIds(distinct, active);
 	}
 
 	// ---------- imágenes de variante ----------
@@ -566,7 +602,7 @@ public class AdminProductService {
 		return new AdminProductDto(p.getId(), p.getName(),
 				brand != null ? brand.getId() : null, brand != null ? brand.getName() : null,
 				p.getMaterial(), p.getShape(),
-				p.getDescription(), p.getTaxRate(), p.getProductType(),
+				p.getDescription(), p.getProductType(),
 				p.getCreatedAt(), p.getUpdatedAt(), categories, variants);
 	}
 }

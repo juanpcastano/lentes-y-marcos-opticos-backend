@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.AdminProductDto;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.BulkProductStatusRequest;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.FacetsDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PageResponse;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.ProductUpsertRequest;
@@ -46,11 +47,12 @@ public class AdminProductController {
 			@RequestParam(required = false) Boolean onSale,
 			@RequestParam(required = false) Boolean isNew,
 			@RequestParam(required = false) Boolean active,
+			@RequestParam(required = false) Boolean needsReview,
 			@RequestParam(required = false) String sort,
 			@RequestParam(defaultValue = "0") int page,
 			@RequestParam(defaultValue = "24") int size) {
 		return ResponseEntity.ok(adminProductService.list(q, brands, categories, materials, shapes,
-				colors, priceMin, priceMax, onSale, isNew, active, sort, page, size));
+				colors, priceMin, priceMax, onSale, isNew, active, needsReview, sort, page, size));
 	}
 
 	@GetMapping("/facets")
@@ -79,5 +81,20 @@ public class AdminProductController {
 	public ResponseEntity<Void> delete(@PathVariable UUID id) {
 		adminProductService.deleteProduct(id);
 		return ResponseEntity.noContent().build();
+	}
+
+	/**
+	 * Activar/desactivar en lote: fija isActive en todas las variantes de los
+	 * productos indicados.
+	 */
+	@PutMapping("/bulk-status")
+	public ResponseEntity<java.util.Map<String, Object>> bulkStatus(
+			@Valid @RequestBody BulkProductStatusRequest request) {
+		int updatedVariants = adminProductService.bulkSetVariantsActive(
+				request.ids(), request.isActive());
+		return ResponseEntity.ok(java.util.Map.of(
+				"updatedProducts", request.ids().size(),
+				"updatedVariants", updatedVariants,
+				"isActive", request.isActive()));
 	}
 }

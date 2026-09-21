@@ -1,6 +1,5 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -17,7 +16,6 @@ public record AdminProductDto(
 		String material,
 		String shape,
 		String description,
-		BigDecimal taxRate,
 		String productType,
 		LocalDateTime createdAt,
 		LocalDateTime updatedAt,

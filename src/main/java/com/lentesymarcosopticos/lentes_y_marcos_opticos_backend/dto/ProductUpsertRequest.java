@@ -1,6 +1,5 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,7 +23,6 @@ public record ProductUpsertRequest(
 		String material,
 		String shape,
 		String description,
-		BigDecimal taxRate,
 		@NotBlank String productType,
 		List<String> categories,
 		List<VariantRequest> variants) {

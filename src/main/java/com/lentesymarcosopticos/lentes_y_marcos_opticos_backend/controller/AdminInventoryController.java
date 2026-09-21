@@ -7,12 +7,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.InventoryConfirmResponse;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.InventoryImportPlanRequest;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.InventoryPreviewResponse;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.exception.ApiException;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service.InventoryImportService;
@@ -48,6 +50,17 @@ public class AdminInventoryController {
 		validateFile(file);
 		return ResponseEntity.ok(inventoryImportService.confirm(file,
 				decisions == null ? Map.of() : decisions));
+	}
+
+	/**
+	 * Aplica el plan curado del wizard (JSON, sin reenviar el archivo).
+	 * Valida todo antes de persistir: 422 con el detalle por campo si el plan
+	 * tiene errores.
+	 */
+	@PostMapping(value = "/confirm-plan", consumes = MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<InventoryConfirmResponse> confirmPlan(
+			@RequestBody InventoryImportPlanRequest plan) {
+		return ResponseEntity.ok(inventoryImportService.confirmPlan(plan));
 	}
 
 	private void validateFile(MultipartFile file) {
