@@ -47,6 +47,15 @@ public class User {
 	@Column
 	private String phone;
 
+	@Column(name = "softix_client_id", unique = true)
+	private String softixClientId;
+
+	@Column(name = "softix_document_type")
+	private String softixDocumentType;
+
+	@Column(name = "softix_document_id")
+	private String softixDocumentId;
+
 	@Column
 	private Boolean isAdmin;
 
