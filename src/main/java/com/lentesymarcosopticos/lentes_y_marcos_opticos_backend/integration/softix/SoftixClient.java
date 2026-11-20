@@ -3,9 +3,11 @@ package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.sof
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Objects;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -52,13 +54,27 @@ public class SoftixClient {
                 .body(String.class));
     }
 
-    public InventoryPage listFrames(String branchId, int page, int pageSize) {
+    public AvailabilityData getAvailability(String sku) {
         return executeAuthorized(token -> restClient.get()
-                .uri(uriBuilder -> uriBuilder.path("/api/inventories/frames/list/{branchId}")
-                        .queryParam("page", page).queryParam("pageSize", pageSize)
-                        .build(branchId))
+                .uri("/api/Inventories/available/{sku}", sku)
                 .header("Authorization", "Bearer " + token)
-                .retrieve().body(InventoryPage.class));
+                .retrieve().body(AvailabilityEnvelope.class)).data();
+    }
+
+    public List<StockItem> listBranchStock(String branchId) {
+        return executeAuthorized(token -> restClient.get()
+                .uri("/api/Inventarios/monturas/lista/{branchId}", branchId)
+                .header("Authorization", "Bearer " + token)
+                .retrieve().body(new ParameterizedTypeReference<List<StockItem>>() {}));
+    }
+
+    public ProductPage listProducts(String productType, int page, int pageSize) {
+        return executeAuthorized(token -> restClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/api/Inventories/products/list/{productType}")
+                        .queryParam("page", page).queryParam("pageSize", pageSize)
+                        .build(productType))
+                .header("Authorization", "Bearer " + token)
+                .retrieve().body(ProductPage.class));
     }
 
     public SchedulePage listSchedules(String branchId, LocalDate date) {

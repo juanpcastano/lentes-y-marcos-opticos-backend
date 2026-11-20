@@ -86,7 +86,7 @@ public class SecurityConfig {
 							"/api/auth/password/reset/confirm")
 						.permitAll()
 						.requestMatchers(HttpMethod.GET, "/api/products/**", "/api/categories/**",
-								"/api/brands/**", "/api/hero-slides")
+								"/api/brands/**", "/api/hero-slides", "/api/inventory/availability/**")
 						.permitAll()
 						.requestMatchers("/api/admin/**").hasRole("ADMIN")
 						.requestMatchers("/error").permitAll()

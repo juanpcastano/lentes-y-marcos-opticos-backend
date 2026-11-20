@@ -1,5 +1,10 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,17 +16,38 @@ import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixCreate
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.User;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.exception.ApiException;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixClient;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixDtos.CustomerCreateRequest;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixDtos.CustomerResponse;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixClientException;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.UserRepository;
 
-import lombok.AllArgsConstructor;
-
 @Service
-@AllArgsConstructor
 public class SoftixLinkService {
+    // Valores de catálogo observados en clientes reales de Softix (muestra de 1000 clientes).
+    private static final String SOFTIX_REGIME = "49";
+    private static final String SOFTIX_PRICE_LIST = "1";
+    private static final String SOFTIX_COUNTRY = "CO";
+    private static final String SOFTIX_PERSON_TYPE = "Natural";
+    private static final String SOFTIX_NO_TAX_RESPONSIBILITY = "ZZ";
+    // Autorización de tratamiento de datos. Pendiente de confirmar el flujo de consentimiento.
+    private static final int SOFTIX_AUTHORIZATION_GRANTED = 1;
+    // Softix confirmó que "NE" (No especificado) es el valor para cuando el cliente no quiere indicar su tipo de sangre.
+    private static final String SOFTIX_BLOOD_TYPE_UNKNOWN = "NE";
+
     private final UserRepository userRepository;
     private final SoftixClient softixClient;
+    private final String creationBranch;
+    private final String createdBy;
+
+    public SoftixLinkService(UserRepository userRepository,
+            SoftixClient softixClient,
+            @Value("${softix.creation-branch}") String creationBranch,
+            @Value("${softix.created-by}") String createdBy) {
+        this.userRepository = userRepository;
+        this.softixClient = softixClient;
+        this.creationBranch = creationBranch;
+        this.createdBy = createdBy;
+    }
 
     @Transactional
     public SoftixLinkResponse link(SoftixLinkRequest request) {
@@ -65,11 +91,33 @@ public class SoftixLinkService {
         rejectIfAlreadyLinked(user, request.documentType(), request.documentId());
 
         try {
-            String creationResponse = softixClient.createCustomer(new com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixDtos.CustomerCreateRequest(
-                    request.documentId(), request.documentType(), request.firstName(), request.middleName(),
-                    request.lastName(), request.secondLastName(), request.mobile(), null, request.email(),
-                    request.birthDate() + "T00:00:00", request.city(), request.locality(), request.address(),
-                    "No especificado", "CO", "Natural", null, null));
+            String creationResponse = softixClient.createCustomer(CustomerCreateRequest.builder()
+                    .documentId(request.documentId())
+                    .documentType(request.documentType())
+                    .firstName(request.firstName())
+                    .middleName(request.middleName())
+                    .lastName(request.lastName())
+                    .secondLastName(request.secondLastName())
+                    .mobile(request.mobile())
+                    .email(request.email())
+                    .birthDate(request.birthDate() + "T00:00:00")
+                    .address(request.address())
+                    .city(request.city())
+                    .locality(request.locality())
+                    .gender(request.gender())
+                    .bloodType(SOFTIX_BLOOD_TYPE_UNKNOWN)
+                    .authorization(SOFTIX_AUTHORIZATION_GRANTED)
+                    .taxResponsibility(SOFTIX_NO_TAX_RESPONSIBILITY)
+                    .taxes(SOFTIX_NO_TAX_RESPONSIBILITY)
+                    .regime(SOFTIX_REGIME)
+                    .priceList(SOFTIX_PRICE_LIST)
+                    .country(SOFTIX_COUNTRY)
+                    .personType(SOFTIX_PERSON_TYPE)
+                    .creationBranch(creationBranch)
+                    .createdBy(createdBy)
+                    .creationDate(LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS)
+                            .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
+                    .build());
             if (creationResponse == null || creationResponse.isBlank()) {
                 throw new ApiException(HttpStatus.BAD_GATEWAY,
                         "Softix no confirmó la creación del cliente");

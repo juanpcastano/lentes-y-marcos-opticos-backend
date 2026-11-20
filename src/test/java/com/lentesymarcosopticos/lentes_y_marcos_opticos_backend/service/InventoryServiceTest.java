@@ -1,20 +1,19 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
-import java.math.BigDecimal;
-import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.exception.ApiException;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixClient;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixDtos.InventoryItem;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixDtos.InventoryPage;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixClientException;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixDtos.AvailabilityData;
 
 @ExtendWith(MockitoExtension.class)
 class InventoryServiceTest {
@@ -22,35 +21,38 @@ class InventoryServiceTest {
     private SoftixClient softixClient;
 
     @Test
-    void transformaInventarioDeSoftixSinExponerRespuestaCruda() {
-        when(softixClient.listFrames("1", 1, 50)).thenReturn(new InventoryPage(List.of(
-                new InventoryItem("M100", "Montura azul", "MONTURA", 5,
-                        new BigDecimal("64663.87"), null, new BigDecimal("10")))));
+    void devuelveLaDisponibilidadTotalDelSku() {
+        when(softixClient.getAvailability("M628")).thenReturn(new AvailabilityData("M628", 27));
 
-        InventoryService service = new InventoryService(softixClient, "1");
+        var response = new InventoryService(softixClient).availability("M628");
 
-        var frames = service.listFrames(1, 50);
-
-        assertThat(frames).hasSize(1);
-        assertThat(frames.getFirst().sku()).isEqualTo("M100");
-        assertThat(frames.getFirst().quantity()).isEqualTo(5);
-        assertThat(frames.getFirst().price()).isEqualByComparingTo("64663.87");
-        verify(softixClient).listFrames("1", 1, 50);
+        assertThat(response.sku()).isEqualTo("M628");
+        assertThat(response.availableQuantity()).isEqualTo(27);
+        verify(softixClient).getAvailability("M628");
     }
 
     @Test
-    void fusionaCantidadDeLasDosSedesTecnicas() {
-        when(softixClient.listFrames("1", 1, 50)).thenReturn(new InventoryPage(List.of(
-                new InventoryItem("M100", "Montura azul", "MONTURA", 2,
-                        new BigDecimal("100"), null, null))));
-        when(softixClient.listFrames("2", 1, 50)).thenReturn(new InventoryPage(List.of(
-                new InventoryItem("M100", "Montura azul", "MONTURA", 3,
-                        new BigDecimal("100"), null, null))));
+    void codigoSinStockDevuelveCero() {
+        when(softixClient.getAvailability("M999999")).thenReturn(new AvailabilityData("M999999", 0));
 
-        InventoryService service = new InventoryService(softixClient, "1,2");
+        var response = new InventoryService(softixClient).availability("M999999");
 
-        var frames = service.listFrames(1, 50);
+        assertThat(response.availableQuantity()).isZero();
+    }
 
-        assertThat(frames).singleElement().extracting(frame -> frame.quantity()).isEqualTo(5);
+    @Test
+    void respuestaSinCantidadSeTrataComoError() {
+        when(softixClient.getAvailability("M1")).thenReturn(new AvailabilityData("M1", null));
+
+        assertThatThrownBy(() -> new InventoryService(softixClient).availability("M1"))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void errorDeSoftixSeConvierteEnErrorDeGateway() {
+        when(softixClient.getAvailability("M1")).thenThrow(new SoftixClientException("caída"));
+
+        assertThatThrownBy(() -> new InventoryService(softixClient).availability("M1"))
+                .isInstanceOf(ApiException.class);
     }
 }

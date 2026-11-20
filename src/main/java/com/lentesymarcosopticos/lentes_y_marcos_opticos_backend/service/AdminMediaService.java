@@ -12,7 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.MediaAssetDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.MediaReferenceDto;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.VariantImage;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.ProductImage;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.exception.ApiException;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.BrandRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.CategoryRepository;
@@ -26,10 +26,10 @@ import lombok.AllArgsConstructor;
 public class AdminMediaService {
 
 	/**
-	 * Las imágenes de catálogo viven en {@code variants/} (una carpeta por
-	 * variante).
+	 * Las imágenes de catálogo viven en {@code products/} (una carpeta por
+	 * producto).
 	 */
-	private static final List<String> FOLDERS = List.of("variants", "brands", "categories", "hero");
+	private static final List<String> FOLDERS = List.of("products", "brands", "categories", "hero");
 
 	private final StorageService storageService;
 	private final BrandRepository brandRepository;
@@ -69,11 +69,9 @@ public class AdminMediaService {
 				new MediaReferenceDto("brand", brand.getId().toString(), brand.getName())));
 		categoryRepository.findAll().forEach(category -> add(result, category.getImageUrl(),
 				new MediaReferenceDto("category", category.getId().toString(), category.getName())));
-		productRepository.findAllWithVariantImages().forEach(product -> product.getVariants()
-				.forEach(variant -> variant.getImages().forEach(image ->
-						add(result, image.getImageUrl(), new MediaReferenceDto("variant",
-								product.getId().toString(),
-								product.getName() + " / " + variant.getColor())))));
+		productRepository.findAllWithImages().forEach(product -> product.getImages().forEach(image ->
+				add(result, image.getImageUrl(), new MediaReferenceDto("product",
+						product.getId().toString(), product.getName()))));
 		heroSlideRepository.findAll().forEach(slide -> add(result, slide.getImageUrl(),
 				new MediaReferenceDto("hero", slide.getId().toString(), slide.getTitle())));
 		return result;
@@ -90,20 +88,19 @@ public class AdminMediaService {
 				category.setImageUrl(null);
 			}
 		});
-		productRepository.findAllWithVariantImages().forEach(product -> product.getVariants()
-				.forEach(variant -> {
-					List<VariantImage> removed = variant.getImages().stream()
-							.filter(image -> key.equals(storageService.keyForUrl(image.getImageUrl())))
-							.toList();
-					boolean primaryRemoved = removed.stream()
-							.anyMatch(image -> Boolean.TRUE.equals(image.getIsPrimary()));
-					variant.getImages().removeAll(removed);
-					if (primaryRemoved) {
-						variant.getImages().stream()
-								.min(Comparator.comparing(image -> image.getSortOrder() == null ? Integer.MAX_VALUE : image.getSortOrder()))
-								.ifPresent(image -> image.setIsPrimary(true));
-					}
-				}));
+		productRepository.findAllWithImages().forEach(product -> {
+			List<ProductImage> removed = product.getImages().stream()
+					.filter(image -> key.equals(storageService.keyForUrl(image.getImageUrl())))
+					.toList();
+			boolean primaryRemoved = removed.stream()
+					.anyMatch(image -> Boolean.TRUE.equals(image.getIsPrimary()));
+			product.getImages().removeAll(removed);
+			if (primaryRemoved) {
+				product.getImages().stream()
+						.min(Comparator.comparing(image -> image.getSortOrder() == null ? Integer.MAX_VALUE : image.getSortOrder()))
+						.ifPresent(image -> image.setIsPrimary(true));
+			}
+		});
 		heroSlideRepository.findAll().forEach(slide -> {
 			if (key.equals(storageService.keyForUrl(slide.getImageUrl()))) {
 				slide.setImageUrl(null);

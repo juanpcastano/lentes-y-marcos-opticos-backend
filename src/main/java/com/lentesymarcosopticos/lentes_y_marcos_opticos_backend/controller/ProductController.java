@@ -1,5 +1,6 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.controller;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -35,9 +36,9 @@ public class ProductController {
 			@RequestParam(required = false) List<String> materials,
 			@RequestParam(required = false) List<String> shapes,
 			@RequestParam(required = false) List<String> colors,
-			@RequestParam(required = false) Integer priceMin,
-			@RequestParam(required = false) Integer priceMax,
-			@RequestParam(required = false) Boolean onSale,
+			@RequestParam(required = false) BigDecimal priceMin,
+			@RequestParam(required = false) BigDecimal priceMax,
+			@RequestParam(defaultValue = "false") boolean includeOutOfStock,
 			@RequestParam(required = false) Boolean isNew,
 			@RequestParam(required = false) String q,
 			@RequestParam(required = false) String sort,
@@ -45,7 +46,7 @@ public class ProductController {
 			@RequestParam(defaultValue = "24") int size) {
 
 		return ResponseEntity.ok(productService.getProducts(categories, brands, materials, shapes,
-				colors, priceMin, priceMax, sort, onSale, isNew, q, page, size));
+				colors, priceMin, priceMax, sort, includeOutOfStock, isNew, q, page, size));
 	}
 
 	@GetMapping("/facets")
@@ -59,8 +60,7 @@ public class ProductController {
 	}
 
 	@GetMapping("/{id}")
-	public ResponseEntity<ProductDetailDto> getProductById(@PathVariable UUID id,
-			@RequestParam(required = false) UUID variant) {
-		return ResponseEntity.ok(productService.getProductById(id, variant));
+	public ResponseEntity<ProductDetailDto> getProductById(@PathVariable UUID id) {
+		return ResponseEntity.ok(productService.getProductById(id));
 	}
 }

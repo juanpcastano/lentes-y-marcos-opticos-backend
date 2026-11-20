@@ -1,7 +1,9 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.controller;
 
-import java.util.UUID;
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -12,20 +14,25 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.AdminProductDto;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.AdminProductUpdateRequest;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.BulkProductStatusRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.FacetsDto;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.ExistingProductImageRequest;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PageResponse;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.ProductUpsertRequest;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.ProductImageDto;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.ProductStatus;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service.AdminProductService;
 
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 
 /**
- * AdminProductController — CRUD de productos (solo ADMIN)
+ * AdminProductController — productos y sus imágenes (solo ADMIN). Los productos
+ * vienen de Softix; aquí no se crean ni se borran.
  */
 @RestController
 @RequestMapping("/api/admin/products")
@@ -42,22 +49,14 @@ public class AdminProductController {
 			@RequestParam(required = false) List<String> materials,
 			@RequestParam(required = false) List<String> shapes,
 			@RequestParam(required = false) List<String> colors,
-			@RequestParam(required = false) Integer priceMin,
-			@RequestParam(required = false) Integer priceMax,
-			@RequestParam(required = false) Boolean onSale,
-			@RequestParam(required = false) Boolean isNew,
-			@RequestParam(required = false) Boolean active,
-			@RequestParam(required = false) Boolean needsReview,
+			@RequestParam(required = false) List<ProductStatus> statuses,
+			@RequestParam(required = false) BigDecimal priceMin,
+			@RequestParam(required = false) BigDecimal priceMax,
 			@RequestParam(required = false) String sort,
 			@RequestParam(defaultValue = "0") int page,
 			@RequestParam(defaultValue = "24") int size) {
 		return ResponseEntity.ok(adminProductService.list(q, brands, categories, materials, shapes,
-				colors, priceMin, priceMax, onSale, isNew, active, needsReview, sort, page, size));
-	}
-
-	@GetMapping("/facets")
-	public ResponseEntity<FacetsDto> facets() {
-		return ResponseEntity.ok(adminProductService.facets());
+				colors, statuses, priceMin, priceMax, sort, page, size));
 	}
 
 	@GetMapping("/{id}")
@@ -65,36 +64,49 @@ public class AdminProductController {
 		return ResponseEntity.ok(adminProductService.get(id));
 	}
 
-	@PostMapping
-	public ResponseEntity<AdminProductDto> create(@Valid @RequestBody ProductUpsertRequest request) {
-		return ResponseEntity.status(201).body(adminProductService.create(request));
-	}
-
 	@PutMapping("/{id}")
 	public ResponseEntity<AdminProductDto> update(@PathVariable UUID id,
-			@Valid @RequestBody ProductUpsertRequest request) {
+			@Valid @RequestBody AdminProductUpdateRequest request) {
 		return ResponseEntity.ok(adminProductService.update(id, request));
 	}
 
-	/** Hard delete (eliminación permanente, no se puede deshacer) */
-	@DeleteMapping("/{id}")
-	public ResponseEntity<Void> delete(@PathVariable UUID id) {
-		adminProductService.deleteProduct(id);
+	/** Cambia el estado de varios productos a la vez. */
+	@PutMapping("/bulk-status")
+	public ResponseEntity<Map<String, Object>> bulkStatus(
+			@Valid @RequestBody BulkProductStatusRequest request) {
+		int updated = adminProductService.bulkSetStatus(request.ids(), request.status());
+		return ResponseEntity.ok(Map.of("updated", updated, "status", request.status()));
+	}
+
+	@PostMapping("/{id}/images")
+	public ResponseEntity<ProductImageDto> addImage(@PathVariable UUID id,
+			@RequestPart("file") MultipartFile file,
+			@RequestParam(required = false) Boolean primary) {
+		return ResponseEntity.status(201).body(adminProductService.addImage(id, file, primary));
+	}
+
+	@PostMapping("/{id}/images/existing")
+	public ResponseEntity<ProductImageDto> addExistingImage(@PathVariable UUID id,
+			@RequestBody ExistingProductImageRequest request) {
+		return ResponseEntity.status(201).body(adminProductService.addExistingImage(id,
+				request.imageUrl(), request.primary()));
+	}
+
+	@DeleteMapping("/{id}/images/{imageId}")
+	public ResponseEntity<Void> deleteImage(@PathVariable UUID id, @PathVariable UUID imageId) {
+		adminProductService.deleteImage(id, imageId);
 		return ResponseEntity.noContent().build();
 	}
 
-	/**
-	 * Activar/desactivar en lote: fija isActive en todas las variantes de los
-	 * productos indicados.
-	 */
-	@PutMapping("/bulk-status")
-	public ResponseEntity<java.util.Map<String, Object>> bulkStatus(
-			@Valid @RequestBody BulkProductStatusRequest request) {
-		int updatedVariants = adminProductService.bulkSetVariantsActive(
-				request.ids(), request.isActive());
-		return ResponseEntity.ok(java.util.Map.of(
-				"updatedProducts", request.ids().size(),
-				"updatedVariants", updatedVariants,
-				"isActive", request.isActive()));
+	@PutMapping("/{id}/images/{imageId}/primary")
+	public ResponseEntity<ProductImageDto> setPrimaryImage(@PathVariable UUID id,
+			@PathVariable UUID imageId) {
+		return ResponseEntity.ok(adminProductService.setPrimaryImage(id, imageId));
+	}
+
+	@PutMapping("/{id}/images/order")
+	public ResponseEntity<List<ProductImageDto>> reorderImages(@PathVariable UUID id,
+			@RequestBody List<UUID> imageIds) {
+		return ResponseEntity.ok(adminProductService.reorderImages(id, imageIds));
 	}
 }

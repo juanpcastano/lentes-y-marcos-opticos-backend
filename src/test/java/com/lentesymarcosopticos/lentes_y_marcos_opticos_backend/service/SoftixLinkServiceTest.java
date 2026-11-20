@@ -14,6 +14,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -25,6 +26,7 @@ import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixCreate
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.User;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.exception.ApiException;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixClient;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixDtos.CustomerCreateRequest;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixDtos.CustomerResponse;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.UserRepository;
 
@@ -41,7 +43,7 @@ class SoftixLinkServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new SoftixLinkService(userRepository, softixClient);
+        service = new SoftixLinkService(userRepository, softixClient, "1", "1");
         user = new User();
         user.setEmail("user@test.com");
         when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
@@ -101,11 +103,27 @@ class SoftixLinkServiceTest {
         SoftixLinkResponse response = service.createAndLink(new SoftixCreateLinkRequest(
                 "CC", "456", "Luis", null, "Gómez", null,
                 "3009876543", "luis@test.com", LocalDate.of(1990, 1, 2),
-                "11", "001", "Calle 1"));
+                "Femenino", "11", "001", "Calle 1"));
 
         assertThat(response.clientId()).isEqualTo("456");
         assertThat(user.getSoftixClientId()).isEqualTo("456");
-        verify(softixClient).createCustomer(any());
+        ArgumentCaptor<CustomerCreateRequest> captor = ArgumentCaptor.forClass(CustomerCreateRequest.class);
+        verify(softixClient).createCustomer(captor.capture());
+        CustomerCreateRequest body = captor.getValue();
+        assertThat(body.documentId()).isEqualTo("456");
+        assertThat(body.birthDate()).isEqualTo("1990-01-02T00:00:00");
+        assertThat(body.gender()).isEqualTo("Femenino");
+        assertThat(body.bloodType()).isEqualTo("NE");
+        assertThat(body.authorization()).isEqualTo(1);
+        assertThat(body.taxResponsibility()).isEqualTo("ZZ");
+        assertThat(body.taxes()).isEqualTo("ZZ");
+        assertThat(body.regime()).isEqualTo("49");
+        assertThat(body.priceList()).isEqualTo("1");
+        assertThat(body.country()).isEqualTo("CO");
+        assertThat(body.personType()).isEqualTo("Natural");
+        assertThat(body.creationBranch()).isEqualTo("1");
+        assertThat(body.createdBy()).isEqualTo("1");
+        assertThat(body.creationDate()).isNotBlank();
         verify(userRepository).save(user);
     }
 
