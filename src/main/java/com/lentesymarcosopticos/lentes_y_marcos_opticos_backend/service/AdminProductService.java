@@ -94,6 +94,12 @@ public class AdminProductService {
 		return toDto(product);
 	}
 
+	/** Eliminación permanente del producto local. Las imágenes quedan en S3 y en la galería. */
+	@Transactional
+	public void delete(UUID id) {
+		productRepository.delete(load(id));
+	}
+
 	@Transactional
 	public int bulkSetStatus(List<UUID> ids, ProductStatus status) {
 		List<Product> products = productRepository.findAllById(ids);

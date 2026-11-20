@@ -71,6 +71,12 @@ public class AdminProductController {
 	}
 
 	/** Cambia el estado de varios productos a la vez. */
+	@DeleteMapping("/{id}")
+	public ResponseEntity<Void> delete(@PathVariable UUID id) {
+		adminProductService.delete(id);
+		return ResponseEntity.noContent().build();
+	}
+
 	@PutMapping("/bulk-status")
 	public ResponseEntity<Map<String, Object>> bulkStatus(
 			@Valid @RequestBody BulkProductStatusRequest request) {
