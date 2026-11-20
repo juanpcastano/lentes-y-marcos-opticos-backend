@@ -16,7 +16,7 @@ Se elimina la entidad `ProductVariant` y sus imágenes pasan al producto.
 
 ## Normalización
 
-Para comparar y mostrar marcas, referencias y categorías se usa una forma normalizada: sin espacios de los extremos, espacios internos colapsados y mayúsculas. Lo que se muestra conserva el valor original. Las diferencias de forma se avisan como advertencia para corregir en Softix.
+Las marcas, referencias y categorías se usan tal cual vienen de Softix (solo se recortan espacios de los extremos y se colapsan los espacios internos). No se cambia la capitalización. Las diferencias de forma ya no se normalizan.
 
 ## Qué pasa en cada caso
 

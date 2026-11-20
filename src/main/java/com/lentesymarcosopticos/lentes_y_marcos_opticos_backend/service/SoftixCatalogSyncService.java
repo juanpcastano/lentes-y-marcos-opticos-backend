@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -77,6 +78,82 @@ public class SoftixCatalogSyncService {
     @Transactional(readOnly = true)
     public SyncResult preview() {
         return process(false);
+    }
+
+    /**
+     * Crea los productos nuevos de Softix que no están bloqueados ni pertenecen a marcas ignoradas.
+     * Devuelve la cantidad creada. No ejecuta la sincronización posterior.
+     */
+    @Transactional
+    public List<String> importNewProducts(Set<String> ignoredBrands, Set<String> ignoredSkus) {
+        Map<String, ProductItem> softix = fetchCatalog();
+        Map<String, Integer> stock = fetchStock();
+        Map<String, String> blocking = blockingErrors(softix);
+        Map<String, Product> local = localBySku();
+        Map<String, Brand> brands = new HashMap<>();
+        brandRepository.findAll().forEach(b -> brands.put(b.getName(), b));
+        Map<String, Category> categories = new HashMap<>();
+        categoryRepository.findAll().forEach(c -> categories.put(c.getName(), c));
+
+        Set<String> ignoredBrandsSet = ignoredBrands == null ? Set.of() : ignoredBrands;
+        Set<String> ignoredSkusSet = ignoredSkus == null ? Set.of() : ignoredSkus;
+        List<String> createdSkus = new ArrayList<>();
+        List<Product> toSave = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+        for (ProductItem item : softix.values()) {
+            String sku = item.code().trim();
+            if (local.containsKey(sku)) {
+                continue;
+            }
+            if (blocking.containsKey(sku)) {
+                continue;
+            }
+            if (ignoredSkusSet.contains(sku)) {
+                continue;
+            }
+            String brandName = normalize(item.brand());
+            if (brandName == null || ignoredBrandsSet.contains(brandName)) {
+                continue;
+            }
+            String categoryName = normalize(item.category());
+            if (categoryName == null) {
+                continue;
+            }
+            String name = trimOrNull(item.name());
+            if (name == null) {
+                name = sku;
+            }
+            String reference = trimOrNull(item.reference());
+            String color = trimOrNull(item.color());
+            BigDecimal price = item.salePrice() == null ? BigDecimal.ZERO : item.salePrice();
+            int newStock = Math.max(0, stock.getOrDefault(sku, 0));
+
+            Brand brand = brands.computeIfAbsent(brandName, n -> brandRepository.save(newBrand(n)));
+            Category category = categories.computeIfAbsent(categoryName, n -> categoryRepository.save(newCategory(n)));
+
+            Product product = new Product();
+            product.setSku(sku);
+            product.setName(name);
+            product.setReference(reference);
+            product.setColor(color);
+            product.setBrand(brand);
+            product.setPrice(price);
+            product.setStock(newStock);
+            product.setSaleVat(item.saleVat() != null && item.saleVat() == 1);
+            product.setStatus(ProductStatus.INACTIVE);
+            product.setSoftixMissing(false);
+            product.setSyncedAt(now);
+            if (item.creationDate() != null) {
+                product.setSoftixCreatedAt(item.creationDate());
+            }
+            product.setCategories(new LinkedHashSet<>(List.of(category)));
+            toSave.add(product);
+            createdSkus.add(sku);
+        }
+        if (!toSave.isEmpty()) {
+            productRepository.saveAll(toSave);
+        }
+        return createdSkus;
     }
 
     private SyncResult process(boolean apply) {
@@ -221,7 +298,7 @@ public class SoftixCatalogSyncService {
     }
 
     /** Errores que bloquean un SKU, por su código. Un SKU aparece una sola vez con su primer motivo. */
-    private Map<String, String> blockingErrors(Map<String, ProductItem> softix) {
+    public Map<String, String> blockingErrors(Map<String, ProductItem> softix) {
         Map<String, String> errors = new LinkedHashMap<>();
         Map<String, Set<String>> brandsByReference = new HashMap<>();
         Map<String, List<String>> skusByIdentity = new HashMap<>();
@@ -316,7 +393,17 @@ public class SoftixCatalogSyncService {
         return local;
     }
 
-    private Map<String, ProductItem> fetchCatalog() {
+    public Set<String> localSkus() {
+        Set<String> skus = new HashSet<>();
+        for (Product p : productRepository.findAll()) {
+            if (p.getSku() != null) {
+                skus.add(p.getSku());
+            }
+        }
+        return skus;
+    }
+
+    public Map<String, ProductItem> fetchCatalog() {
         Map<String, ProductItem> items = new LinkedHashMap<>();
         int page = 1;
         int totalPages = 1;
@@ -335,7 +422,7 @@ public class SoftixCatalogSyncService {
         return items;
     }
 
-    private Map<String, Integer> fetchStock() {
+    public Map<String, Integer> fetchStock() {
         Map<String, Integer> stock = new HashMap<>();
         for (String branch : STOCK_BRANCHES) {
             for (var row : softixClient.listBranchStock(branch)) {
@@ -362,11 +449,15 @@ public class SoftixCatalogSyncService {
     }
 
     /** Marca y categoría: sin espacios sobrantes y en mayúsculas, para no duplicarlas. */
+    public static String normalizePublic(String value) {
+        return normalize(value);
+    }
+
     private static String normalize(String value) {
         if (value == null) {
             return null;
         }
-        String normalized = value.trim().replaceAll("\\s+", " ").toUpperCase(Locale.ROOT);
+        String normalized = value.trim().replaceAll("\\s+", " ");
         return normalized.isEmpty() ? null : normalized;
     }
 

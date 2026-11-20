@@ -25,6 +25,8 @@ import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SyncRunTr
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.exception.ApiException;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixClient;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixClientException;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.IgnoredBrandRepository;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.IgnoredSkuRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.SoftixSyncRunLogRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.SoftixSyncRunRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service.SoftixCatalogSyncService.Entry;
@@ -40,6 +42,10 @@ class SoftixIntegrationServiceTest {
     private SoftixSyncRunRepository runRepository;
     @Mock
     private SoftixSyncRunLogRepository logRepository;
+    @Mock
+    private IgnoredBrandRepository ignoredBrandRepository;
+    @Mock
+    private IgnoredSkuRepository ignoredSkuRepository;
     @InjectMocks
     private SoftixIntegrationService service;
 
