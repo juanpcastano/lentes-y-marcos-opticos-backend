@@ -37,12 +37,19 @@ No existe un endpoint de catálogo para estos valores. Se tomaron de una muestra
 | `creationBranch` | `1` (configurable) | 2 es el más común (708), seguido de 1 (289) |
 | `createdBy` | `1` (configurable) | ID de usuario de Softix; `1` es el más común |
 
-`creationBranch` y `createdBy` se configuran con `SOFTIX_CREATION_BRANCH` y `SOFTIX_CREATED_BY`. Sus valores definitivos deben confirmarse con la óptica.
+`creationBranch` y `createdBy` se configuran con `SOFTIX_CREATION_BRANCH` y
+`SOFTIX_CREATED_BY`. Para clientes web, los valores acordados son `1` y `1`.
 
-## Pendiente
+## Decisiones cerradas
 
-- `bloodType = "NE"` es provisional. Softix acepta `NE`, pero no documenta su significado ni la lista de valores válidos. El valor se confirmará con el soporte de Softix y puede cambiar. Probado en sandbox: rechaza `No especificado`, `No aplica`, `Desconocido` y textos de 6 o más caracteres; acepta cualquier texto de hasta 5 caracteres.
+- `bloodType = "NE"` es el valor acordado para clientes web. Softix acepta
+  `NE` como "No especificado". En sandbox rechaza `No especificado`,
+  `No aplica`, `Desconocido` y textos de 6 o más caracteres; acepta cualquier
+  texto de hasta 5 caracteres.
 
-- `authorization = 1` indica autorización de tratamiento de datos. Hoy se envía fijo; el consentimiento real debe definirse en el flujo de registro.
-- Confirmar con la óptica la sede (`creationBranch`) y el usuario (`createdBy`) de los clientes creados desde el ecommerce.
-- Verificar los valores de producción de `regime`, `priceList` y `creationBranch` con una consulta de solo lectura.
+## Pendientes operativos
+
+- `authorization = 1` indica autorización de tratamiento de datos. Hoy se
+  envía fijo; el consentimiento real debe definirse en el flujo de registro.
+- Verificar los valores de producción de `regime` y `priceList` con una
+  consulta de solo lectura antes de habilitar escrituras en producción.

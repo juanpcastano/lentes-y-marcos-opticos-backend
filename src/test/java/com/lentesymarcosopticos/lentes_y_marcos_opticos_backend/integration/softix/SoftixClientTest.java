@@ -7,6 +7,8 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import java.time.LocalDate;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -73,6 +75,49 @@ class SoftixClientTest {
         SoftixDtos.CustomerResponse customer = client.findCustomer("123");
 
         assertThat(customer.documentId()).isEqualTo("123");
+        server.verify();
+    }
+
+    @Test
+    void consultaInventarioCatalogoStockYHorariosConLasRutasOficiales() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("http://softix.test");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        SoftixClient client = newClient(builder);
+
+        expectLogin(server, "token-integracion");
+        server.expect(requestTo("http://softix.test/api/Inventories/available/M628"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer token-integracion"))
+                .andRespond(withSuccess("""
+                        {"data":{"productCode":"M628","availableQuantity":7}}
+                        """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://softix.test/api/Inventories/products/list/MONTURA?page=1&pageSize=500"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer token-integracion"))
+                .andRespond(withSuccess("""
+                        {"page":1,"pageSize":500,"totalPages":1,"totalRecords":1,
+                         "products":[{"code":"M628","salePrice":270000}]}
+                        """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://softix.test/api/Inventarios/monturas/lista/1"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer token-integracion"))
+                .andRespond(withSuccess("""
+                        [{"codigo":"M628","cantidad":7,"valor":270000}]
+                        """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://softix.test/api/schedules/1/2026-10-28"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer token-integracion"))
+                .andRespond(withSuccess("""
+                        {"listAvailableTimes":[{"id":"slot-1","optometrist":"Ana","time":"09:00:00"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        assertThat(client.getAvailability("M628").availableQuantity()).isEqualTo(7);
+        assertThat(client.listProducts("MONTURA", 1, 500).products()).hasSize(1);
+        assertThat(client.listBranchStock("1")).singleElement()
+                .satisfies(stock -> assertThat(stock.codigo()).isEqualTo("M628"));
+        assertThat(client.listSchedules("1", LocalDate.of(2026, 10, 28)).listAvailableTimes())
+                .singleElement().satisfies(slot -> assertThat(slot.id()).isEqualTo("slot-1"));
+
         server.verify();
     }
 

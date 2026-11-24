@@ -54,7 +54,7 @@ No existe endpoint para listar bodegas o ubicaciones, ni para órdenes de compra
 - **Catálogo:** conserva productos activos sin stock como agotados. El precio guardado es `salePrice` y la sincronización no modifica el precio usando el indicador de IVA.
 - **Ficha de producto:** consulta `available` en el momento, así que el detalle está al día.
 - **Validación antes de cobrar:** usar `available` para cada código del carrito. Puede haber hasta una hora de desfase en el catálogo, pero el pago nunca se confirma sin validar contra Softix. Ver "Carrito y revalidación" más abajo.
-- **Carrito (propuesta acordada, no implementada):** cada línea del carrito es un producto (un SKU) y tiene un `quantity` cuyo máximo es el stock que devuelve el backend para ese `sku` (`Inventories/available/{sku}`).
+- **Carrito (implementado en frontend):** cada línea del carrito es un producto (un SKU) y tiene un `quantity` cuyo máximo es el stock que devuelve el backend para ese `sku` (`Inventories/available/{sku}`).
   - Si el stock es 0, el `quantity` máximo es 0. Una línea con máximo 0 se trata igual que un producto desactivado: va a "No disponibles" y no suma al total.
   - Si el `quantity` guardado es mayor que el stock actual, se ajusta al stock y el cliente ve el aviso.
   - La ficha de producto muestra la misma cifra: "Disponible" si hay stock, "Agotado" si no.
@@ -69,7 +69,6 @@ No existe endpoint para listar bodegas o ubicaciones, ni para órdenes de compra
 
 ## Pendientes
 
-- **Óptica:** confirmar que `creationBranch = 1` y `createdBy = 1` son aceptables para clientes web.
 - **B2:** la óptica no sabe qué es. Se van a borrar las unidades en Softix. Confirmar después que `available` coincide con la suma de sedes.
 - **Softix:** confirmar cómo se borran las unidades de B2 (ajuste de inventario) y que el movimiento quede registrado.
 - **Sandbox, datos de prueba creados (no hay API para borrarlos):**
