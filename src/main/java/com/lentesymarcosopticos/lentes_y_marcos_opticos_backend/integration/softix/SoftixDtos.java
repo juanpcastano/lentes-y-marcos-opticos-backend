@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import lombok.Builder;
 
 public final class SoftixDtos {
@@ -134,11 +136,11 @@ public final class SoftixDtos {
 
     /**
      * Solo los campos que usa el catálogo. salePrice es el precio unitario de venta;
-     * saleVat = 1 significa que ese precio ya incluye IVA.
+     * saleVAT = 1 significa que ese precio ya incluye IVA. Es informativo: no altera el precio.
      */
     public record ProductItem(String code, String name, String brand, String productType,
-            String color, String reference, String category, BigDecimal salePrice, Integer saleVat,
-            LocalDateTime creationDate) {
+            String color, String reference, String category, BigDecimal salePrice,
+            @JsonProperty("saleVAT") Integer saleVat, LocalDateTime creationDate) {
     }
 
     public record SchedulePage(List<AvailableTime> listAvailableTimes) {

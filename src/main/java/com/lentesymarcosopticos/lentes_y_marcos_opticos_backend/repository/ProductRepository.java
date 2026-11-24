@@ -32,21 +32,21 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
 
 	boolean existsByBrand_Id(UUID brandId);
 
-	@Query("SELECT DISTINCT b.name FROM Product p JOIN p.brand b WHERE p.status = :status AND p.stock > 0 ORDER BY b.name")
+	@Query("SELECT DISTINCT b.name FROM Product p JOIN p.brand b WHERE p.status = :status AND p.softixMissing = false AND p.stock > 0 ORDER BY b.name")
 	List<String> findDistinctBrandNames(@Param("status") ProductStatus status);
 
-	@Query("SELECT DISTINCT c.name FROM Product p JOIN p.categories c WHERE p.status = :status AND p.stock > 0 ORDER BY c.name")
+	@Query("SELECT DISTINCT c.name FROM Product p JOIN p.categories c WHERE p.status = :status AND p.softixMissing = false AND p.stock > 0 ORDER BY c.name")
 	List<String> findDistinctCategoryNames(@Param("status") ProductStatus status);
 
-	@Query("SELECT DISTINCT p.material FROM Product p WHERE p.material IS NOT NULL AND p.status = :status AND p.stock > 0 ORDER BY p.material")
+	@Query("SELECT DISTINCT p.material FROM Product p WHERE p.material IS NOT NULL AND p.status = :status AND p.softixMissing = false AND p.stock > 0 ORDER BY p.material")
 	List<String> findDistinctMaterials(@Param("status") ProductStatus status);
 
-	@Query("SELECT DISTINCT p.shape FROM Product p WHERE p.shape IS NOT NULL AND p.status = :status AND p.stock > 0 ORDER BY p.shape")
+	@Query("SELECT DISTINCT p.shape FROM Product p WHERE p.shape IS NOT NULL AND p.status = :status AND p.softixMissing = false AND p.stock > 0 ORDER BY p.shape")
 	List<String> findDistinctShapes(@Param("status") ProductStatus status);
 
-	@Query("SELECT DISTINCT p.color FROM Product p WHERE p.color IS NOT NULL AND p.status = :status AND p.stock > 0 ORDER BY p.color")
+	@Query("SELECT DISTINCT p.color FROM Product p WHERE p.color IS NOT NULL AND p.status = :status AND p.softixMissing = false AND p.stock > 0 ORDER BY p.color")
 	List<String> findDistinctColors(@Param("status") ProductStatus status);
 
-	@Query("SELECT MIN(p.price), MAX(p.price) FROM Product p WHERE p.status = :status AND p.stock > 0")
+	@Query("SELECT MIN(p.price), MAX(p.price) FROM Product p WHERE p.status = :status AND p.softixMissing = false AND p.stock > 0")
 	List<Object[]> findPriceBounds(@Param("status") ProductStatus status);
 }

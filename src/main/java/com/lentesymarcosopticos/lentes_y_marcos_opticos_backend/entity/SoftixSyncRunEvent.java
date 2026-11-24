@@ -5,6 +5,8 @@ import java.util.UUID;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -14,14 +16,15 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * SoftixSyncRunLog — evento de una sincronización: resumen, SKU omitido u oculto, o error.
+ * SoftixSyncRunEvent — un evento de una ejecución: cambio, aviso, error o resumen de un producto,
+ * marca, categoría o de la ejecución. La clave es el SKU para productos y el nombre para marcas y categorías.
  */
 @Entity
-@Table(name = "softix_sync_run_logs")
+@Table(name = "softix_sync_run_events")
 @NoArgsConstructor
 @Getter
 @Setter
-public class SoftixSyncRunLog {
+public class SoftixSyncRunEvent {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
@@ -29,14 +32,22 @@ public class SoftixSyncRunLog {
 	@Column(name = "run_id", nullable = false)
 	private UUID runId;
 
+	@Enumerated(EnumType.STRING)
+	@Column(name = "entity_type", nullable = false, length = 20)
+	private SyncEventEntity entityType;
+
+	@Column(name = "entity_key", length = 255)
+	private String entityKey;
+
+	@Enumerated(EnumType.STRING)
+	@Column(nullable = false, length = 20)
+	private SyncEventAction action;
+
 	@Column(nullable = false, length = 10)
 	private String level;
 
-	@Column(length = 50)
-	private String sku;
-
 	@Column(name = "field_name", length = 30)
-	private String fieldName;
+	private String field;
 
 	@Column(name = "old_value", columnDefinition = "TEXT")
 	private String oldValue;
@@ -50,16 +61,14 @@ public class SoftixSyncRunLog {
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 
-	public SoftixSyncRunLog(UUID runId, String level, String sku, String message) {
-		this(runId, level, sku, null, null, null, message);
-	}
-
-	public SoftixSyncRunLog(UUID runId, String level, String sku, String fieldName, String oldValue,
-			String newValue, String message) {
+	public SoftixSyncRunEvent(UUID runId, SyncEventEntity entityType, String entityKey, SyncEventAction action,
+			String level, String field, String oldValue, String newValue, String message) {
 		this.runId = runId;
+		this.entityType = entityType;
+		this.entityKey = entityKey;
+		this.action = action;
 		this.level = level;
-		this.sku = sku;
-		this.fieldName = fieldName;
+		this.field = field;
 		this.oldValue = oldValue;
 		this.newValue = newValue;
 		this.message = message;

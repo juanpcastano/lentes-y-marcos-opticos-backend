@@ -50,8 +50,8 @@ No existe endpoint para listar bodegas o ubicaciones, ni para órdenes de compra
 
 ## Decisiones de sincronización y validación
 
-- **Sincronización cada hora:** consulta `monturas/lista/1` y `/2`, y guarda cantidad y precio por código en PostgreSQL. Las ventas son pocas en tienda, así que una hora es suficiente para el catálogo.
-- **Catálogo:** muestra solo modelos con stock mayor que cero en la sincronización, con el `salePrice` guardado.
+- **Sincronización cada hora:** consulta `products/list/MONTURA` y `monturas/lista/1` y `/2`, y guarda los datos válidos en PostgreSQL. La ejecución horaria usa el mismo registro que las ejecuciones manuales e importaciones.
+- **Catálogo:** conserva productos activos sin stock como agotados. El precio guardado es `salePrice` y la sincronización no modifica el precio usando el indicador de IVA.
 - **Ficha de producto:** consulta `available` en el momento, así que el detalle está al día.
 - **Validación antes de cobrar:** usar `available` para cada código del carrito. Puede haber hasta una hora de desfase en el catálogo, pero el pago nunca se confirma sin validar contra Softix. Ver "Carrito y revalidación" más abajo.
 - **Carrito (propuesta acordada, no implementada):** cada línea del carrito es un producto (un SKU) y tiene un `quantity` cuyo máximo es el stock que devuelve el backend para ese `sku` (`Inventories/available/{sku}`).
@@ -92,7 +92,6 @@ No se usa `Inventories/product/code/{sku}` como fuente. Para `M628` devuelve `br
 
 - **Body que funciona:** el ejemplo de la documentación oficial de Softix (`POST /api/sales/create`). Requiere `userId`, `branchId` (entero), `clientId`, `total`, `subtotal`, `vatValue`, `discount`, `payments`, `paymentCustomer`, `balance`, `paymentType` (`paymentCode`, `paymentMethod`, `paymentName`), `iva`, `deliveryDate` (`dd/MM/yyyy HH:mm:ss`), `deliveryTime` (`10:00 AM`) y `items`. Las versiones que omitían `balance`, `iva`, `payments` o `paymentCustomer` respondían `400` con "Could not save changes".
 - **Precio:** Softix guardó el precio que enviamos, no el `valor` de su inventario. Para `M1`, `valor` es 193277.31 y la venta quedó con `total` 200000.
-- **IVA por producto:** en `products/list`, el campo `saleVAT` indica si el producto lleva IVA. Hay 1292 productos con `saleVAT = 1` y 965 con `saleVAT = 0`. `saleVATValue` vale 0 en todos, así que no sirve para calcular el IVA. Decisión confirmada por la óptica: el `salePrice` de los productos con `saleVAT = 1` ya incluye IVA.
-- **Cálculo del IVA:** en el ejemplo oficial, `unitPrice` es sin IVA (243697.48) y `total` es con IVA (290000); 290000 / 1.19 = 243697.48. Para productos con `saleVAT = 1`, el backend separa el `salePrice` en subtotal e IVA al 19 %. Para `saleVAT = 0`, el precio es final y el IVA es 0.
+- **IVA por producto:** en `products/list`, el campo JSON `saleVAT` se mapea explícitamente a `saleVat` y se guarda como booleano informativo. No se usa para calcular ni modificar el precio mostrado; cualquier cálculo de venta deberá definir su propia regla cuando se implemente.
 - **Campo `amount`:** en la respuesta de consulta de ventas aparece 231932.77 (= total + IVA), mientras `totalToPay` es 200000. No se usa en nuestro flujo, pero hay que tenerlo en cuenta al leer ventas.
 - **Efecto:** la prueba creó la venta `30061` en sandbox, con `M1` (1 unidad). No se puede anular por API.

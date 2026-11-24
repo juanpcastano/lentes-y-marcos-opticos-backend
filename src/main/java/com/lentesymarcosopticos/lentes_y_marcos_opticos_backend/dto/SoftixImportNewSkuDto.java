@@ -3,8 +3,9 @@ package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto;
 import java.math.BigDecimal;
 
 /**
- * Un SKU nuevo en Softix que podría importarse. `blocked` indica que tiene un error bloqueante
- * y no se creará hasta corregirlo en Softix. `ignored` indica que su marca está ignorada.
+ * Un SKU nuevo en Softix y su estado de importación:
+ * VALID (se importará), BLOCKED (inválido, con motivo),
+ * IGNORED_BY_BRAND o IGNORED_BY_SKU (no se importará por una lista de ignorados).
  */
 public record SoftixImportNewSkuDto(
         String sku,
@@ -15,7 +16,6 @@ public record SoftixImportNewSkuDto(
         String name,
         BigDecimal price,
         int stock,
-        boolean blocked,
-        String blockReason,
-        boolean ignored) {
+        String state,
+        String blockReason) {
 }

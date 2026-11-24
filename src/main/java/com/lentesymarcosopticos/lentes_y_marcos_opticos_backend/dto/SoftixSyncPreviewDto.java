@@ -8,5 +8,7 @@ public record SoftixSyncPreviewDto(
         int errors,
         int stockChanged,
         int priceChanged,
+        List<String> newBrands,
+        List<String> newCategories,
         List<SoftixSyncIssueDto> issues) {
 }

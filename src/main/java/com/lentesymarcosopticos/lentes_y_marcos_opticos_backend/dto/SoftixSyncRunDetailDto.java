@@ -4,5 +4,5 @@ import java.util.List;
 
 public record SoftixSyncRunDetailDto(
         SoftixSyncRunDto run,
-        List<SoftixSyncLogDto> logs) {
+        List<SoftixSyncEventDto> logs) {
 }

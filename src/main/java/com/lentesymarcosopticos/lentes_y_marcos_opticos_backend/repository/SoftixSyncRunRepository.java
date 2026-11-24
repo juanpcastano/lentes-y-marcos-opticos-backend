@@ -1,5 +1,6 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -16,4 +17,6 @@ public interface SoftixSyncRunRepository extends JpaRepository<SoftixSyncRun, UU
 	Page<SoftixSyncRun> findAllByOrderByStartedAtDesc(Pageable pageable);
 
 	boolean existsByStatus(SyncRunStatus status);
+
+	List<SoftixSyncRun> findByStatus(SyncRunStatus status);
 }

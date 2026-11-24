@@ -9,7 +9,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -22,6 +21,8 @@ import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.Brand;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.Category;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.Product;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.ProductStatus;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SyncEventAction;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SyncEventEntity;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixClient;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixDtos.ProductItem;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.BrandRepository;
@@ -38,9 +39,11 @@ import lombok.extern.slf4j.Slf4j;
  * Fuentes: products/list (existencia, marca, referencia, color, categoría, nombre y precio)
  * y monturas/lista por sede (stock). Si una llamada a Softix falla, no se aplica nada.
  *
- * Un SKU con error bloqueante (sin categoría, sin referencia, referencia repetida en marcas
- * distintas, o duplicado de marca, referencia y color) conserva sus datos anteriores y el error
- * queda registrado. Los demás SKUs se procesan normalmente.
+ * Un SKU con error bloqueante (sin categoría, sin marca, sin referencia, sin precio válido,
+ * referencia repetida en marcas distintas, o duplicado de marca, referencia y color) conserva
+ * sus datos anteriores y el error queda registrado. Los demás SKUs se procesan normalmente.
+ * La identidad de marca, categoría, referencia y color es exacta: solo se recortan y colapsan
+ * espacios; un cambio de mayúsculas es otro valor.
  */
 @Service
 @Slf4j
@@ -54,19 +57,46 @@ public class SoftixCatalogSyncService {
     private static final int PAGE_SIZE = 500;
     /** Sedes cuyo stock suma la disponibilidad de la web. B2 no entra. */
     private static final List<String> STOCK_BRANCHES = List.of("1", "2");
-    private static final String HIDDEN_NAME = ProductStatus.HIDDEN.name();
 
     private final SoftixClient softixClient;
     private final ProductRepository productRepository;
     private final BrandRepository brandRepository;
     private final CategoryRepository categoryRepository;
 
-    /** Un cambio (INFO), un aviso (WARN) o un error (ERROR) de un SKU. */
-    public record Entry(String level, String sku, String field, String oldValue, String newValue, String message) {
+    /**
+     * Un evento de la ejecución: cambio (INFO), aviso (WARN) o error (ERROR). La clave es el SKU
+     * para productos y el nombre para marcas y categorías.
+     */
+    public record Entry(String level, SyncEventEntity entityType, SyncEventAction action, String key,
+            String field, String oldValue, String newValue, String message) {
     }
 
     public record SyncResult(int updated, int hidden, int errors,
             int stockChanged, int priceChanged, List<Entry> entries) {
+    }
+
+    /** Estado de un SKU nuevo respecto de la importación. */
+    public enum NewSkuState {
+        VALID, BLOCKED, IGNORED_BY_BRAND, IGNORED_BY_SKU
+    }
+
+    /** Un SKU nuevo de Softix con su estado de importación. */
+    public record NewSku(String sku, String brand, String reference, String color, String category,
+            String name, BigDecimal price, int stock, NewSkuState state, String blockReason) {
+    }
+
+    /** Clasificación del catálogo para la importación, sin escribir nada. */
+    public record ImportPreview(List<NewSku> newSkus, List<String> brandsToCreate,
+            List<String> categoriesToCreate) {
+    }
+
+    /** Resultado de una importación real. */
+    public record ImportResult(List<String> createdSkus, List<String> createdBrands,
+            List<String> createdCategories, List<NewSku> newSkus) {
+
+        public List<NewSku> blocked() {
+            return newSkus.stream().filter(s -> s.state() == NewSkuState.BLOCKED).toList();
+        }
     }
 
     @Transactional
@@ -81,90 +111,153 @@ public class SoftixCatalogSyncService {
     }
 
     /**
-     * Crea los productos nuevos de Softix que no están bloqueados ni pertenecen a marcas ignoradas.
-     * Devuelve la cantidad creada. No ejecuta la sincronización posterior.
+     * Crea los productos nuevos de Softix que están en estado VALID. Omite marcas ignoradas,
+     * SKUs ignorados y SKUs bloqueados. Devuelve lo que se creó realmente, incluidas las
+     * marcas y categorías nuevas. No ejecuta la sincronización posterior.
      */
     @Transactional
-    public List<String> importNewProducts(Set<String> ignoredBrands, Set<String> ignoredSkus) {
+    public ImportResult importNewProducts(Set<String> ignoredBrands, Set<String> ignoredSkus) {
         Map<String, ProductItem> softix = fetchCatalog();
         Map<String, Integer> stock = fetchStock();
+        requireNonEmptySources(softix, stock);
         Map<String, String> blocking = blockingErrors(softix);
-        Map<String, Product> local = localBySku();
+
         Map<String, Brand> brands = new HashMap<>();
         brandRepository.findAll().forEach(b -> brands.put(b.getName(), b));
         Map<String, Category> categories = new HashMap<>();
         categoryRepository.findAll().forEach(c -> categories.put(c.getName(), c));
 
-        Set<String> ignoredBrandsSet = ignoredBrands == null ? Set.of() : ignoredBrands;
-        Set<String> ignoredSkusSet = ignoredSkus == null ? Set.of() : ignoredSkus;
+        ImportPreview preview = classify(softix, stock, blocking, localSkus(), ignoredBrands, ignoredSkus,
+                brands.keySet(), categories.keySet());
+
         List<String> createdSkus = new ArrayList<>();
+        List<String> createdBrands = new ArrayList<>();
+        List<String> createdCategories = new ArrayList<>();
         List<Product> toSave = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
-        for (ProductItem item : softix.values()) {
-            String sku = item.code().trim();
-            if (local.containsKey(sku)) {
+        for (NewSku ns : preview.newSkus()) {
+            if (ns.state() != NewSkuState.VALID) {
                 continue;
             }
-            if (blocking.containsKey(sku)) {
-                continue;
+            Brand brand = brands.get(ns.brand());
+            if (brand == null) {
+                brand = brandRepository.save(newBrand(ns.brand()));
+                brands.put(ns.brand(), brand);
+                createdBrands.add(ns.brand());
             }
-            if (ignoredSkusSet.contains(sku)) {
-                continue;
+            Category category = categories.get(ns.category());
+            if (category == null) {
+                category = categoryRepository.save(newCategory(ns.category()));
+                categories.put(ns.category(), category);
+                createdCategories.add(ns.category());
             }
-            String brandName = normalize(item.brand());
-            if (brandName == null || ignoredBrandsSet.contains(brandName)) {
-                continue;
-            }
-            String categoryName = normalize(item.category());
-            if (categoryName == null) {
-                continue;
-            }
-            String name = trimOrNull(item.name());
-            if (name == null) {
-                name = sku;
-            }
-            String reference = trimOrNull(item.reference());
-            String color = trimOrNull(item.color());
-            BigDecimal price = item.salePrice() == null ? BigDecimal.ZERO : item.salePrice();
-            int newStock = Math.max(0, stock.getOrDefault(sku, 0));
-
-            Brand brand = brands.computeIfAbsent(brandName, n -> brandRepository.save(newBrand(n)));
-            Category category = categories.computeIfAbsent(categoryName, n -> categoryRepository.save(newCategory(n)));
 
             Product product = new Product();
-            product.setSku(sku);
-            product.setName(name);
-            product.setReference(reference);
-            product.setColor(color);
+            product.setSku(ns.sku());
+            product.setName(ns.name());
+            product.setReference(ns.reference());
+            product.setColor(ns.color());
             product.setBrand(brand);
-            product.setPrice(price);
-            product.setStock(newStock);
-            product.setSaleVat(item.saleVat() != null && item.saleVat() == 1);
-            product.setStatus(ProductStatus.INACTIVE);
+            product.setPrice(ns.price());
+            product.setStock(ns.stock());
+            ProductItem item = softix.get(ns.sku());
+            product.setSaleVat(item != null && item.saleVat() != null && item.saleVat() == 1);
+            product.setStatus(ProductStatus.ACTIVE);
             product.setSoftixMissing(false);
             product.setSyncedAt(now);
-            if (item.creationDate() != null) {
+            if (item != null && item.creationDate() != null) {
                 product.setSoftixCreatedAt(item.creationDate());
             }
             product.setCategories(new LinkedHashSet<>(List.of(category)));
             toSave.add(product);
-            createdSkus.add(sku);
+            createdSkus.add(ns.sku());
         }
         if (!toSave.isEmpty()) {
             productRepository.saveAll(toSave);
         }
-        return createdSkus;
+        return new ImportResult(createdSkus, createdBrands, createdCategories, preview.newSkus());
+    }
+
+    /** Clasifica el catálogo nuevo sin crear nada. Usa el mismo cálculo que la importación real. */
+    @Transactional(readOnly = true)
+    public ImportPreview previewImport(Set<String> ignoredBrands, Set<String> ignoredSkus) {
+        Map<String, ProductItem> softix = fetchCatalog();
+        Map<String, Integer> stock = fetchStock();
+        Map<String, String> blocking = blockingErrors(softix);
+        Set<String> localBrands = new HashSet<>();
+        brandRepository.findAll().forEach(b -> localBrands.add(b.getName()));
+        Set<String> localCategories = new HashSet<>();
+        categoryRepository.findAll().forEach(c -> localCategories.add(c.getName()));
+        return classify(softix, stock, blocking, localSkus(), ignoredBrands, ignoredSkus,
+                localBrands, localCategories);
+    }
+
+    private ImportPreview classify(Map<String, ProductItem> softix, Map<String, Integer> stock,
+            Map<String, String> blocking, Set<String> localSkus, Set<String> ignoredBrands,
+            Set<String> ignoredSkus, Set<String> localBrands, Set<String> localCategories) {
+        Set<String> ignoredBrandSet = ignoredBrands == null ? Set.of() : ignoredBrands;
+        Set<String> ignoredSkuSet = ignoredSkus == null ? Set.of() : ignoredSkus;
+        Set<String> local = localSkus == null ? Set.of() : localSkus;
+        List<NewSku> newSkus = new ArrayList<>();
+        Set<String> brandsToCreate = new TreeSet<>();
+        Set<String> categoriesToCreate = new TreeSet<>();
+
+        for (ProductItem item : sortedBySku(softix)) {
+            String sku = item.code().trim();
+            if (local.contains(sku)) {
+                continue;
+            }
+            String brand = normalize(item.brand());
+            String category = normalize(item.category());
+            String reference = normalize(item.reference());
+            String color = normalize(item.color());
+            String name = trimOrNull(item.name());
+            if (name == null) {
+                name = sku;
+            }
+            BigDecimal price = item.salePrice() == null ? BigDecimal.ZERO : item.salePrice();
+            int available = Math.max(0, stock.getOrDefault(sku, 0));
+
+            NewSkuState state;
+            String reason = null;
+            if (brand != null && ignoredBrandSet.contains(brand)) {
+                state = NewSkuState.IGNORED_BY_BRAND;
+            } else if (ignoredSkuSet.contains(sku)) {
+                state = NewSkuState.IGNORED_BY_SKU;
+            } else if (blocking.containsKey(sku)) {
+                state = NewSkuState.BLOCKED;
+                reason = blocking.get(sku);
+            } else {
+                state = NewSkuState.VALID;
+            }
+
+            newSkus.add(new NewSku(sku, brand, reference, color, category, name, price, available,
+                    state, reason));
+            if (state == NewSkuState.VALID) {
+                if (brand != null && !localBrands.contains(brand)) {
+                    brandsToCreate.add(brand);
+                }
+                if (category != null && !localCategories.contains(category)) {
+                    categoriesToCreate.add(category);
+                }
+            }
+        }
+        return new ImportPreview(newSkus, new ArrayList<>(brandsToCreate),
+                new ArrayList<>(categoriesToCreate));
     }
 
     private SyncResult process(boolean apply) {
         Map<String, ProductItem> softix = fetchCatalog();
         Map<String, Integer> stock = fetchStock();
+        requireNonEmptySources(softix, stock);
         Map<String, String> blocking = blockingErrors(softix);
         Map<String, Product> local = localBySku();
         Map<String, Brand> brands = new HashMap<>();
         brandRepository.findAll().forEach(b -> brands.put(b.getName(), b));
         Map<String, Category> categories = new HashMap<>();
         categoryRepository.findAll().forEach(c -> categories.put(c.getName(), c));
+        java.util.Set<String> knownBrands = new java.util.HashSet<>(brands.keySet());
+        java.util.Set<String> knownCategories = new java.util.HashSet<>(categories.keySet());
 
         LocalDateTime now = LocalDateTime.now();
         List<Entry> entries = new ArrayList<>();
@@ -186,14 +279,14 @@ public class SoftixCatalogSyncService {
 
             if (error != null) {
                 errors++;
-                entries.add(new Entry(LEVEL_ERROR, sku, null, null, null,
+                entries.add(new Entry(LEVEL_ERROR, SyncEventEntity.PRODUCT, SyncEventAction.BLOCKED, sku, null, null, null,
                         error + ". Se conservan los datos anteriores."));
                 continue;
             }
             List<Entry> changes = new ArrayList<>();
             String name = trimOrNull(item.name());
-            String reference = trimOrNull(item.reference());
-            String color = trimOrNull(item.color());
+            String reference = normalize(item.reference());
+            String color = normalize(item.color());
             String brandName = normalize(item.brand());
             String categoryName = normalize(item.category());
             BigDecimal newPrice = item.salePrice() == null ? BigDecimal.ZERO : item.salePrice();
@@ -211,29 +304,29 @@ public class SoftixCatalogSyncService {
             if (brandName != null) {
                 diff(changes, sku, "marca", oldBrand, brandName);
                 normalizationWarning(changes, sku, "marca", item.brand(), brandName, oldBrand);
-                if (!brandName.equals(oldBrand) && !brands.containsKey(brandName)) {
-                    changes.add(new Entry(LEVEL_WARN, sku, "marca", null, brandName, "Marca nueva"));
+                if (!brandName.equals(oldBrand) && knownBrands.add(brandName)) {
+                    changes.add(new Entry(LEVEL_INFO, SyncEventEntity.BRAND, SyncEventAction.CREATED, brandName, null, null, null, "Marca nueva"));
                 }
             }
             if (categoryName != null) {
                 diff(changes, sku, "categoría", oldCategory, categoryName);
                 normalizationWarning(changes, sku, "categoría", item.category(), categoryName, oldCategory);
-                if (!categoryName.equals(oldCategory) && !categories.containsKey(categoryName)) {
-                    changes.add(new Entry(LEVEL_WARN, sku, "categoría", null, categoryName, "Categoría nueva"));
+                if (!categoryName.equals(oldCategory) && knownCategories.add(categoryName)) {
+                    changes.add(new Entry(LEVEL_INFO, SyncEventEntity.CATEGORY, SyncEventAction.CREATED, categoryName, null, null, null, "Categoría nueva"));
                 }
             }
             if (product.getPrice() == null || product.getPrice().compareTo(newPrice) != 0) {
-                changes.add(new Entry(LEVEL_INFO, sku, "precio", valueOf(product.getPrice()),
+                changes.add(new Entry(LEVEL_INFO, SyncEventEntity.PRODUCT, SyncEventAction.UPDATED, sku, "precio", valueOf(product.getPrice()),
                         newPrice.toPlainString(), "Cambio de precio"));
                 priceChanged++;
             }
             if (!Objects.equals(product.getStock(), newStock)) {
-                changes.add(new Entry(LEVEL_INFO, sku, "stock", valueOf(product.getStock()),
+                changes.add(new Entry(LEVEL_INFO, SyncEventEntity.PRODUCT, SyncEventAction.UPDATED, sku, "stock", valueOf(product.getStock()),
                         String.valueOf(newStock), "Cambio de stock"));
                 stockChanged++;
             }
-            if (product.getStatus() == ProductStatus.HIDDEN) {
-                changes.add(new Entry(LEVEL_INFO, sku, "estado", HIDDEN_NAME, ProductStatus.INACTIVE.name(),
+            if (Boolean.TRUE.equals(product.getSoftixMissing())) {
+                changes.add(new Entry(LEVEL_INFO, SyncEventEntity.PRODUCT, SyncEventAction.RESTORED, sku, "softixMissing", "true", "false",
                         "Vuelve a aparecer en Softix"));
             }
 
@@ -250,19 +343,24 @@ public class SoftixCatalogSyncService {
                     product.setColor(color);
                 }
                 if (brandName != null) {
-                    product.setBrand(brands.computeIfAbsent(brandName, n -> brandRepository.save(newBrand(n))));
+                    Brand b = brands.get(brandName);
+                    if (b == null) {
+                        b = brandRepository.save(newBrand(brandName));
+                        brands.put(brandName, b);
+                    }
+                    product.setBrand(b);
                 }
                 if (categoryName != null) {
-                    Category category = categories.computeIfAbsent(categoryName,
-                            n -> categoryRepository.save(newCategory(n)));
+                    Category category = categories.get(categoryName);
+                    if (category == null) {
+                        category = categoryRepository.save(newCategory(categoryName));
+                        categories.put(categoryName, category);
+                    }
                     product.setCategories(new LinkedHashSet<>(List.of(category)));
                 }
                 product.setPrice(newPrice);
                 product.setStock(newStock);
                 product.setSaleVat(item.saleVat() != null && item.saleVat() == 1);
-                if (product.getStatus() == ProductStatus.HIDDEN) {
-                    product.setStatus(ProductStatus.INACTIVE);
-                }
                 product.setSoftixMissing(false);
                 product.setSyncedAt(now);
                 if (item.creationDate() != null) {
@@ -274,14 +372,13 @@ public class SoftixCatalogSyncService {
 
         int hidden = 0;
         for (Product product : local.values()) {
-            if (softix.containsKey(product.getSku()) || product.getStatus() == ProductStatus.HIDDEN) {
+            if (softix.containsKey(product.getSku()) || Boolean.TRUE.equals(product.getSoftixMissing())) {
                 continue;
             }
             hidden++;
-            entries.add(new Entry(LEVEL_INFO, product.getSku(), "estado", valueOf(product.getStatus()),
-                    HIDDEN_NAME, "Oculto: ya no aparece en Softix"));
+            entries.add(new Entry(LEVEL_INFO, SyncEventEntity.PRODUCT, SyncEventAction.HIDDEN, product.getSku(), "softixMissing", "false",
+                    "true", "Oculto: ya no aparece en Softix"));
             if (apply) {
-                product.setStatus(ProductStatus.HIDDEN);
                 product.setSoftixMissing(true);
                 product.setSyncedAt(now);
                 changedProducts.add(product);
@@ -297,6 +394,15 @@ public class SoftixCatalogSyncService {
         return new SyncResult(updated, hidden, errors, stockChanged, priceChanged, entries);
     }
 
+    private static void requireNonEmptySources(Map<String, ProductItem> catalog, Map<String, Integer> stock) {
+        if (catalog.isEmpty()) {
+            throw new IllegalStateException("Softix devolvió un catálogo vacío");
+        }
+        if (stock.isEmpty()) {
+            throw new IllegalStateException("Softix devolvió un stock vacío");
+        }
+    }
+
     /** Errores que bloquean un SKU, por su código. Un SKU aparece una sola vez con su primer motivo. */
     public Map<String, String> blockingErrors(Map<String, ProductItem> softix) {
         Map<String, String> errors = new LinkedHashMap<>();
@@ -305,30 +411,37 @@ public class SoftixCatalogSyncService {
 
         for (ProductItem item : softix.values()) {
             String sku = item.code().trim();
-            if (normalize(item.category()) == null) {
+            String category = normalize(item.category());
+            String reference = normalize(item.reference());
+            String brand = normalize(item.brand());
+            String color = normalize(item.color());
+
+            if (category == null) {
                 errors.put(sku, "Sin categoría en Softix");
-                continue;
-            }
-            String reference = trimOrNull(item.reference());
-            if (reference == null) {
+            } else if (reference == null) {
                 errors.put(sku, "Sin referencia en Softix");
-                continue;
+            } else if (brand == null) {
+                errors.put(sku, "Sin marca en Softix");
+            } else if (item.salePrice() == null || item.salePrice().signum() <= 0) {
+                errors.put(sku, "Sin precio válido en Softix");
             }
-            String referenceKey = reference.toUpperCase(Locale.ROOT);
-            String brandKey = Objects.toString(normalize(item.brand()), "");
-            String colorKey = Objects.toString(trimOrNull(item.color()), "").toUpperCase(Locale.ROOT);
-            brandsByReference.computeIfAbsent(referenceKey, k -> new TreeSet<>()).add(brandKey);
-            skusByIdentity.computeIfAbsent(brandKey + "|" + referenceKey + "|" + colorKey, k -> new ArrayList<>())
-                    .add(sku);
+
+            // Las reglas de duplicados miran la identidad exacta aunque el SKU ya esté bloqueado
+            // por otro motivo: la referencia sigue existiendo en Softix.
+            if (reference != null && brand != null) {
+                brandsByReference.computeIfAbsent(reference, k -> new TreeSet<>()).add(brand);
+                String identity = brand + "|" + reference + "|" + Objects.toString(color, "");
+                skusByIdentity.computeIfAbsent(identity, k -> new ArrayList<>()).add(sku);
+            }
         }
 
         for (ProductItem item : softix.values()) {
             String sku = item.code().trim();
-            String reference = trimOrNull(item.reference());
+            String reference = normalize(item.reference());
             if (errors.containsKey(sku) || reference == null) {
                 continue;
             }
-            Set<String> brands = brandsByReference.get(reference.toUpperCase(Locale.ROOT));
+            Set<String> brands = brandsByReference.get(reference);
             if (brands != null && brands.size() > 1) {
                 errors.put(sku, "Referencia " + reference + " repetida en marcas distintas: "
                         + String.join(", ", brands));
@@ -352,7 +465,7 @@ public class SoftixCatalogSyncService {
 
     private void diff(List<Entry> changes, String sku, String field, String oldValue, String newValue) {
         if (newValue != null && !Objects.equals(oldValue, newValue)) {
-            changes.add(new Entry(LEVEL_INFO, sku, field, oldValue, newValue, "Cambio de " + field));
+            changes.add(new Entry(LEVEL_INFO, SyncEventEntity.PRODUCT, SyncEventAction.UPDATED, sku, field, oldValue, newValue, "Cambio de " + field));
         }
     }
 
@@ -360,7 +473,7 @@ public class SoftixCatalogSyncService {
             String normalized, String oldValue) {
         String trimmed = trimOrNull(raw);
         if (trimmed != null && !trimmed.equals(normalized) && !normalized.equals(oldValue)) {
-            changes.add(new Entry(LEVEL_WARN, sku, field, trimmed, normalized,
+            changes.add(new Entry(LEVEL_WARN, SyncEventEntity.PRODUCT, SyncEventAction.UPDATED, sku, field, trimmed, normalized,
                     "Se guarda normalizado; corregir en Softix"));
         }
     }
@@ -448,7 +561,10 @@ public class SoftixCatalogSyncService {
         return brand;
     }
 
-    /** Marca y categoría: sin espacios sobrantes y en mayúsculas, para no duplicarlas. */
+    /**
+     * Marca, categoría, referencia y color: sin espacios sobrantes y con la capitalización
+     * original. La comparación es exacta, así que un cambio de mayúsculas crea otro valor.
+     */
     public static String normalizePublic(String value) {
         return normalize(value);
     }

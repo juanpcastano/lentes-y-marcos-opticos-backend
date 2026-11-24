@@ -10,16 +10,16 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SoftixSyncRunLog;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SoftixSyncRunEvent;
 
 /**
- * SoftixSyncRunLogRepository
+ * SoftixSyncRunEventRepository
  */
-public interface SoftixSyncRunLogRepository extends JpaRepository<SoftixSyncRunLog, Long> {
-	List<SoftixSyncRunLog> findByRunIdOrderByIdAsc(UUID runId);
+public interface SoftixSyncRunEventRepository extends JpaRepository<SoftixSyncRunEvent, Long> {
+	List<SoftixSyncRunEvent> findByRunIdOrderByIdAsc(UUID runId);
 
 	@Modifying
 	@Transactional
-	@Query("DELETE FROM SoftixSyncRunLog l WHERE l.createdAt < :cutoff")
+	@Query("DELETE FROM SoftixSyncRunEvent e WHERE e.createdAt < :cutoff")
 	int deleteCreatedBefore(@Param("cutoff") LocalDateTime cutoff);
 }

@@ -62,4 +62,16 @@ class SoftixDtosTest {
             assertThat(product.salePrice()).isEqualByComparingTo("270000");
         });
     }
+
+    @Test
+    void mapeaSaleVatDesdeLaClaveSaleVAT() throws Exception {
+        String json = """
+                {"products":[{"code":"M628","salePrice":270000,"saleVAT":1}]}
+                """;
+
+        ProductPage page = mapper.readValue(json, ProductPage.class);
+
+        assertThat(page.products()).singleElement()
+                .satisfies(product -> assertThat(product.saleVat()).isEqualTo(1));
+    }
 }

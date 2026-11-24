@@ -12,8 +12,12 @@ public record SoftixSyncRunDto(
         SyncRunStatus status,
         LocalDateTime startedAt,
         LocalDateTime finishedAt,
+        int created,
         int updated,
         int hidden,
+        int restored,
         int errors,
+        int newBrands,
+        int newCategories,
         String errorMessage) {
 }

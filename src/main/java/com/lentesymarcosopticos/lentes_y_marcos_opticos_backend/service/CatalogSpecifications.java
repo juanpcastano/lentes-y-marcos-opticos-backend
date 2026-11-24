@@ -22,13 +22,17 @@ public final class CatalogSpecifications {
 	}
 
 	/**
-	 * Tienda: activo y con stock. Con includeOutOfStock también se muestran los agotados.
+	 * Tienda: activo, con respaldo en Softix y con stock. Con includeOutOfStock también
+	 * se muestran los agotados.
 	 */
 	public static Specification<Product> visible(boolean includeOutOfStock) {
-		return (root, query, cb) -> includeOutOfStock
-				? cb.equal(root.get("status"), ProductStatus.ACTIVE)
-				: cb.and(cb.equal(root.get("status"), ProductStatus.ACTIVE),
-						cb.greaterThan(root.get("stock"), 0));
+		return (root, query, cb) -> {
+			var active = cb.equal(root.get("status"), ProductStatus.ACTIVE);
+			var present = cb.isFalse(root.get("softixMissing"));
+			return includeOutOfStock
+					? cb.and(active, present)
+					: cb.and(active, present, cb.greaterThan(root.get("stock"), 0));
+		};
 	}
 
 	public static Specification<Product> statusIn(List<ProductStatus> statuses) {

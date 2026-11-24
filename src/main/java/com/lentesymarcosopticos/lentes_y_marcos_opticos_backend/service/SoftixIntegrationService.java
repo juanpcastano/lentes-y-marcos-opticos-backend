@@ -5,26 +5,32 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PageResponse;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixConnectionStatusDto;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixSyncIssueDto;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixSyncLogDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixImportNewSkuDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixImportPreviewDto;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixSyncEventDto;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixSyncIssueDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixSyncPreviewDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixSyncRunDetailDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixSyncRunDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.IgnoredBrand;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.IgnoredSku;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SoftixSyncRun;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SoftixSyncRunLog;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SoftixSyncRunEvent;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SyncEventAction;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SyncEventEntity;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SyncRunStatus;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SyncRunTrigger;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.exception.ApiException;
@@ -32,9 +38,10 @@ import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.soft
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixClientException;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.IgnoredBrandRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.IgnoredSkuRepository;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.SoftixSyncRunLogRepository;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.SoftixSyncRunEventRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.SoftixSyncRunRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service.SoftixCatalogSyncService.Entry;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service.SoftixCatalogSyncService.ImportResult;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service.SoftixCatalogSyncService.SyncResult;
 
 import lombok.AllArgsConstructor;
@@ -43,6 +50,10 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * SoftixIntegrationService — orquesta la integración con Softix desde el panel:
  * verificación de conexión, vista previa, ejecución y registro de cada sincronización.
+ *
+ * Cada ejecución se crea antes de tocar productos. La importación y la sincronización corren en
+ * una sola transacción junto con sus eventos; si falla, se revierte todo y la ejecución queda
+ * como FAILED en una transacción aparte.
  */
 @Service
 @Slf4j
@@ -50,15 +61,17 @@ import lombok.extern.slf4j.Slf4j;
 public class SoftixIntegrationService {
     private static final String PRODUCT_TYPE = "MONTURA";
     private static final String UNEXPECTED_ERROR = "Error inesperado durante la sincronización";
+    private static final String ORPHAN_MESSAGE = "Interrumpida: la aplicación se reinició durante la ejecución";
     private static final int MAX_PAGE_SIZE = 100;
     private static final int LOG_RETENTION_DAYS = 90;
 
     private final SoftixClient softixClient;
     private final SoftixCatalogSyncService catalogSyncService;
     private final SoftixSyncRunRepository runRepository;
-    private final SoftixSyncRunLogRepository logRepository;
+    private final SoftixSyncRunEventRepository eventRepository;
     private final IgnoredBrandRepository ignoredBrandRepository;
     private final IgnoredSkuRepository ignoredSkuRepository;
+    private final TransactionTemplate transactionTemplate;
 
     public SoftixConnectionStatusDto checkConnection() {
         LocalDateTime now = LocalDateTime.now();
@@ -72,134 +85,200 @@ public class SoftixIntegrationService {
 
     public SoftixSyncPreviewDto preview() {
         SyncResult result = catalogSyncService.preview();
+        Set<String> newBrands = new TreeSet<>();
+        Set<String> newCategories = new TreeSet<>();
+        for (Entry e : result.entries()) {
+            if (e.action() == SyncEventAction.CREATED && e.entityType() == SyncEventEntity.BRAND) {
+                newBrands.add(e.key());
+            }
+            if (e.action() == SyncEventAction.CREATED && e.entityType() == SyncEventEntity.CATEGORY) {
+                newCategories.add(e.key());
+            }
+        }
         return new SoftixSyncPreviewDto(
                 result.updated(), result.hidden(), result.errors(),
                 result.stockChanged(), result.priceChanged(),
+                new ArrayList<>(newBrands),
+                new ArrayList<>(newCategories),
                 result.entries().stream().map(this::toIssueDto).toList());
     }
 
     /** Vista previa de importación: productos nuevos + actualizaciones + errores + marcas ignoradas. */
     @Transactional(readOnly = true)
     public SoftixImportPreviewDto importPreview() {
-        var softix = catalogSyncService.fetchCatalog();
-        var stock = catalogSyncService.fetchStock();
-        var blocking = catalogSyncService.blockingErrors(softix);
-        var local = new java.util.HashMap<String, com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.Product>();
-        // reuse local skus via repository? Need productRepository. Not in this service. Use sync service? 
-        // We'll fetch local skus through a helper added to catalog sync service.
-        var localSkus = catalogSyncService.localSkus();
         Set<String> ignoredBrands = ignoredBrandNames();
         Set<String> ignoredSkus = ignoredSkuNames();
         SyncResult syncResult = catalogSyncService.preview();
+        var importPreview = catalogSyncService.previewImport(ignoredBrands, ignoredSkus);
 
-        List<SoftixImportNewSkuDto> newSkus = new ArrayList<>();
-        int ignoredCount = 0;
-        int blockedCount = 0;
-        List<String> toCreate = new ArrayList<>();
-        for (var item : softix.values()) {
-            String sku = item.code().trim();
-            if (localSkus.contains(sku)) {
+        List<SoftixImportNewSkuDto> newSkus = importPreview.newSkus().stream()
+                .map(this::toNewSkuDto)
+                .toList();
+        List<String> toCreate = importPreview.newSkus().stream()
+                .filter(s -> s.state() == SoftixCatalogSyncService.NewSkuState.VALID)
+                .map(SoftixCatalogSyncService.NewSku::sku)
+                .toList();
+        List<String> blockedSkus = importPreview.newSkus().stream()
+                .filter(s -> s.state() == SoftixCatalogSyncService.NewSkuState.BLOCKED)
+                .map(SoftixCatalogSyncService.NewSku::sku)
+                .toList();
+        int ignoredCount = (int) importPreview.newSkus().stream()
+                .filter(s -> s.state() == SoftixCatalogSyncService.NewSkuState.IGNORED_BY_BRAND
+                        || s.state() == SoftixCatalogSyncService.NewSkuState.IGNORED_BY_SKU)
+                .count();
+
+        Set<String> newBrandSet = new TreeSet<>(importPreview.brandsToCreate());
+        Set<String> newCategorySet = new TreeSet<>(importPreview.categoriesToCreate());
+        for (Entry e : syncResult.entries()) {
+            if (e.action() == SyncEventAction.CREATED && e.entityType() == SyncEventEntity.BRAND) {
+                newBrandSet.add(e.key());
+            }
+            if (e.action() == SyncEventAction.CREATED && e.entityType() == SyncEventEntity.CATEGORY) {
+                newCategorySet.add(e.key());
+            }
+        }
+
+        Set<String> updatedSet = new java.util.LinkedHashSet<>();
+        Set<String> hiddenSet = new java.util.LinkedHashSet<>();
+        Set<String> errorSet = new java.util.LinkedHashSet<>();
+        for (Entry entry : syncResult.entries()) {
+            if (entry.entityType() != SyncEventEntity.PRODUCT) {
                 continue;
             }
-            String brandName = SoftixCatalogSyncService.normalizePublic(item.brand());
-            String categoryName = SoftixCatalogSyncService.normalizePublic(item.category());
-            boolean blocked = blocking.containsKey(sku);
-            boolean ignoredFlag = (brandName != null && ignoredBrands.contains(brandName))
-                    || ignoredSkus.contains(sku);
-            if (blocked) {
-                blockedCount++;
-            }
-            if (ignoredFlag) {
-                ignoredCount++;
-            }
-            newSkus.add(new SoftixImportNewSkuDto(
-                    sku,
-                    brandName,
-                    trimOrNull(item.reference()),
-                    trimOrNull(item.color()),
-                    categoryName,
-                    trimOrNull(item.name()),
-                    item.salePrice() == null ? java.math.BigDecimal.ZERO : item.salePrice(),
-                    Math.max(0, stock.getOrDefault(sku, 0)),
-                    blocked,
-                    blocked ? blocking.get(sku) : null,
-                    ignoredFlag));
-            if (!blocked && !ignoredFlag) {
-                toCreate.add(sku);
+            if (entry.action() == SyncEventAction.BLOCKED) {
+                errorSet.add(entry.key());
+            } else if (entry.action() == SyncEventAction.HIDDEN) {
+                hiddenSet.add(entry.key());
+            } else {
+                updatedSet.add(entry.key());
             }
         }
-        newSkus.sort(java.util.Comparator.comparing(SoftixImportNewSkuDto::sku));
-
-        java.util.Set<String> updatedSet = new java.util.LinkedHashSet<>();
-        java.util.Set<String> hiddenSet = new java.util.LinkedHashSet<>();
-        java.util.Set<String> errorSet = new java.util.LinkedHashSet<>();
-        for (var entry : syncResult.entries()) {
-            if (entry.sku() == null) continue;
-            if (entry.level().equals("ERROR")) {
-                errorSet.add(entry.sku());
-            } else if ("estado".equals(entry.field()) && "HIDDEN".equals(entry.newValue())) {
-                hiddenSet.add(entry.sku());
-            } else if (entry.field() != null) {
-                updatedSet.add(entry.sku());
-            }
-        }
-        // blocked new skus are also errors
-        for (var ns : newSkus) {
-            if (ns.blocked()) errorSet.add(ns.sku());
-        }
+        errorSet.addAll(blockedSkus);
 
         return new SoftixImportPreviewDto(
-                syncResult.updated(), syncResult.hidden(), syncResult.errors(),
+                syncResult.updated(), syncResult.hidden(), syncResult.errors() + blockedSkus.size(),
                 syncResult.stockChanged(), syncResult.priceChanged(),
-                (int) newSkus.stream().filter(s -> !s.blocked() && !s.ignored()).count(),
-                ignoredCount, blockedCount,
+                toCreate.size(), ignoredCount, blockedSkus.size(),
                 syncResult.entries().stream().map(this::toIssueDto).toList(),
                 newSkus,
                 new ArrayList<>(ignoredBrands),
                 new ArrayList<>(ignoredSkus),
+                new ArrayList<>(newBrandSet),
+                new ArrayList<>(newCategorySet),
                 toCreate,
                 new ArrayList<>(updatedSet),
                 new ArrayList<>(hiddenSet),
                 new ArrayList<>(errorSet));
     }
 
-    /** Ejecuta la importación: crea productos nuevos y luego sincroniza con origen IMPORT. */
+    /** Importa los SKUs válidos y luego sincroniza, en una sola ejecución con origen IMPORT. */
     public synchronized SoftixSyncRunDto runImport() {
+        return execute(SyncRunTrigger.IMPORT, true);
+    }
+
+    /**
+     * Ejecuta y registra una sincronización. Si falla, nada se aplica y la ejecución queda como FAILED.
+     */
+    public synchronized SoftixSyncRunDto runSync(SyncRunTrigger trigger) {
+        return execute(trigger, false);
+    }
+
+    private SoftixSyncRunDto execute(SyncRunTrigger trigger, boolean withImport) {
         if (runRepository.existsByStatus(SyncRunStatus.RUNNING)) {
             throw new ApiException(HttpStatus.CONFLICT, "Ya hay una sincronización en curso");
         }
+        eventRepository.deleteCreatedBefore(LocalDateTime.now().minusDays(LOG_RETENTION_DAYS));
+        UUID runId = runRepository.save(new SoftixSyncRun(trigger, LocalDateTime.now())).getId();
+        try {
+            return transactionTemplate.execute(status -> applyRun(runId, withImport));
+        } catch (RuntimeException ex) {
+            String message = safeMessage(ex);
+            log.warn("Sincronización Softix fallida: {}", message);
+            markFailed(runId, message);
+            throw new ApiException(HttpStatus.BAD_GATEWAY, message);
+        }
+    }
+
+    private SoftixSyncRunDto applyRun(UUID runId, boolean withImport) {
         Set<String> ignoredBrands = ignoredBrandNames();
         Set<String> ignoredSkus = ignoredSkuNames();
-        List<String> createdSkus = catalogSyncService.importNewProducts(ignoredBrands, ignoredSkus);
-        // blocked new SKUs (not created)
-        java.util.Set<String> local = catalogSyncService.localSkus();
-        java.util.Map<String, com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.integration.softix.SoftixDtos.ProductItem> softix =
-                catalogSyncService.fetchCatalog();
-        java.util.Map<String, String> blocking = catalogSyncService.blockingErrors(softix);
-        List<String> blockedSkus = new ArrayList<>();
-        for (String sku : softix.keySet()) {
-            String s = sku.trim();
-            if (local.contains(s) || !blocking.containsKey(s)) continue;
-            blockedSkus.add(s);
+        List<Entry> entries = new ArrayList<>();
+        int created = 0;
+        int importErrors = 0;
+
+        if (withImport) {
+            ImportResult imported = catalogSyncService.importNewProducts(ignoredBrands, ignoredSkus);
+            created = imported.createdSkus().size();
+            for (String sku : imported.createdSkus()) {
+                entries.add(new Entry(SoftixCatalogSyncService.LEVEL_INFO, SyncEventEntity.PRODUCT,
+                        SyncEventAction.CREATED, sku, null, null, null, "Producto nuevo importado"));
+            }
+            for (String brand : imported.createdBrands()) {
+                entries.add(new Entry(SoftixCatalogSyncService.LEVEL_INFO, SyncEventEntity.BRAND,
+                        SyncEventAction.CREATED, brand, null, null, null, "Marca nueva"));
+            }
+            for (String category : imported.createdCategories()) {
+                entries.add(new Entry(SoftixCatalogSyncService.LEVEL_INFO, SyncEventEntity.CATEGORY,
+                        SyncEventAction.CREATED, category, null, null, null, "Categoría nueva"));
+            }
+            for (var blocked : imported.blocked()) {
+                entries.add(new Entry(SoftixCatalogSyncService.LEVEL_ERROR, SyncEventEntity.PRODUCT,
+                        SyncEventAction.BLOCKED, blocked.sku(), null, null, null, blocked.blockReason()));
+                importErrors++;
+            }
         }
 
-        SoftixSyncRunDto run = runSync(SyncRunTrigger.IMPORT);
-        SoftixSyncRun r = runRepository.findById(run.id()).orElse(null);
-        if (r != null) {
-            List<SoftixSyncRunLog> logs = new ArrayList<>();
-            for (String sku : createdSkus) {
-                logs.add(new SoftixSyncRunLog(r.getId(), SoftixCatalogSyncService.LEVEL_INFO, sku,
-                        "creación", null, sku, "Producto nuevo importado"));
-            }
-            for (String sku : blockedSkus) {
-                logs.add(new SoftixSyncRunLog(r.getId(), SoftixCatalogSyncService.LEVEL_ERROR, sku,
-                        null, null, null, blocking.get(sku)));
-            }
-            if (!logs.isEmpty()) {
-                logRepository.saveAll(logs);
-            }
+        SyncResult result = catalogSyncService.sync();
+        entries.addAll(result.entries());
+
+        int errors = result.errors() + importErrors;
+        int restored = countOf(entries, SyncEventEntity.PRODUCT, SyncEventAction.RESTORED);
+        int newBrands = countOf(entries, SyncEventEntity.BRAND, SyncEventAction.CREATED);
+        int newCategories = countOf(entries, SyncEventEntity.CATEGORY, SyncEventAction.CREATED);
+        entries.add(new Entry(SoftixCatalogSyncService.LEVEL_INFO, SyncEventEntity.RUN, SyncEventAction.SUMMARY,
+                null, null, null, null, String.format(
+                        "Terminada: %d creados, %d actualizados, %d ocultos, %d restaurados, %d con error, "
+                                + "%d marcas nuevas, %d categorías nuevas, %d cambios de stock, %d cambios de precio",
+                        created, result.updated(), result.hidden(), restored, errors,
+                        newBrands, newCategories, result.stockChanged(), result.priceChanged())));
+
+        SoftixSyncRun run = runRepository.findById(runId).orElseThrow();
+        run.setCreatedCount(created);
+        run.setUpdatedCount(result.updated());
+        run.setHiddenCount(result.hidden());
+        run.setRestoredCount(restored);
+        run.setErrorCount(errors);
+        run.setNewBrandCount(newBrands);
+        run.setNewCategoryCount(newCategories);
+        run.setStatus(errors > 0 ? SyncRunStatus.PARTIAL : SyncRunStatus.SUCCESS);
+        run.setFinishedAt(LocalDateTime.now());
+        eventRepository.saveAll(entries.stream().map(e -> toEvent(runId, e)).toList());
+        return toDto(run);
+    }
+
+    private void markFailed(UUID runId, String message) {
+        runRepository.findById(runId).ifPresent(run -> {
+            run.setStatus(SyncRunStatus.FAILED);
+            run.setFinishedAt(LocalDateTime.now());
+            run.setErrorMessage(message);
+            runRepository.save(run);
+        });
+        eventRepository.save(new SoftixSyncRunEvent(runId, SyncEventEntity.RUN, null, SyncEventAction.SUMMARY,
+                SoftixCatalogSyncService.LEVEL_ERROR, null, null, null, message));
+    }
+
+    /** Al arrancar, las ejecuciones que quedaron en RUNNING no pueden seguir: se marcan como FAILED. */
+    @EventListener(ApplicationReadyEvent.class)
+    @Transactional
+    public void failOrphanedRuns() {
+        LocalDateTime now = LocalDateTime.now();
+        for (SoftixSyncRun run : runRepository.findByStatus(SyncRunStatus.RUNNING)) {
+            run.setStatus(SyncRunStatus.FAILED);
+            run.setFinishedAt(now);
+            run.setErrorMessage(ORPHAN_MESSAGE);
+            eventRepository.save(new SoftixSyncRunEvent(run.getId(), SyncEventEntity.RUN, null,
+                    SyncEventAction.SUMMARY, SoftixCatalogSyncService.LEVEL_ERROR, null, null, null, ORPHAN_MESSAGE));
         }
-        return run;
     }
 
     @Transactional(readOnly = true)
@@ -214,7 +293,9 @@ public class SoftixIntegrationService {
         if (normalized == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Nombre de marca inválido");
         }
-        if (!ignoredBrandRepository.existsByName(normalized)) {
+        boolean exists = ignoredBrandRepository.findAll().stream()
+                .anyMatch(ib -> ib.getName().equals(normalized));
+        if (!exists) {
             IgnoredBrand b = new IgnoredBrand();
             b.setName(normalized);
             ignoredBrandRepository.save(b);
@@ -223,7 +304,10 @@ public class SoftixIntegrationService {
 
     @Transactional
     public void unignoreBrand(String name) {
-        ignoredBrandRepository.deleteByName(normalizeName(name));
+        String normalized = normalizeName(name);
+        ignoredBrandRepository.findAll().stream()
+                .filter(ib -> ib.getName().equals(normalized))
+                .forEach(ib -> ignoredBrandRepository.delete(ib));
     }
 
     @Transactional(readOnly = true)
@@ -260,6 +344,12 @@ public class SoftixIntegrationService {
                 .map(IgnoredBrand::getName).toList());
     }
 
+    private static int countOf(List<Entry> entries, SyncEventEntity entityType, SyncEventAction action) {
+        return (int) entries.stream()
+                .filter(e -> e.entityType() == entityType && e.action() == action)
+                .count();
+    }
+
     private static String normalizeName(String value) {
         if (value == null) return null;
         String normalized = value.trim().replaceAll("\\s+", " ");
@@ -272,47 +362,18 @@ public class SoftixIntegrationService {
         return t.isEmpty() ? null : t;
     }
 
-    /**
-     * Ejecuta y registra una sincronización. Si Softix falla, el registro queda como FAILED
-     * y se responde con error sin aplicar cambios parciales.
-     */
-    public synchronized SoftixSyncRunDto runSync(SyncRunTrigger trigger) {
-        if (runRepository.existsByStatus(SyncRunStatus.RUNNING)) {
-            throw new ApiException(HttpStatus.CONFLICT, "Ya hay una sincronización en curso");
-        }
-        logRepository.deleteCreatedBefore(LocalDateTime.now().minusDays(LOG_RETENTION_DAYS));
-        SoftixSyncRun run = runRepository.save(new SoftixSyncRun(trigger, LocalDateTime.now()));
-        try {
-            SyncResult result = catalogSyncService.sync();
-            run.setUpdatedCount(result.updated());
-            run.setHiddenCount(result.hidden());
-            run.setErrorCount(result.errors());
-            run.setStatus(result.errors() > 0 ? SyncRunStatus.PARTIAL : SyncRunStatus.SUCCESS);
-            run.setFinishedAt(LocalDateTime.now());
-            runRepository.save(run);
-
-            List<SoftixSyncRunLog> logs = new ArrayList<>();
-            for (Entry entry : result.entries()) {
-                logs.add(new SoftixSyncRunLog(run.getId(), entry.level(), entry.sku(), entry.field(),
-                        entry.oldValue(), entry.newValue(), entry.message()));
-            }
-            logs.add(new SoftixSyncRunLog(run.getId(), SoftixCatalogSyncService.LEVEL_INFO, null, String.format(
-                    "Terminada: %d actualizados, %d ocultos, %d con error, "
-                            + "%d cambios de stock, %d cambios de precio",
-                    result.updated(), result.hidden(), result.errors(),
-                    result.stockChanged(), result.priceChanged())));
-            logRepository.saveAll(logs);
-            return toDto(run);
-        } catch (RuntimeException ex) {
-            String message = safeMessage(ex);
-            log.warn("Sincronización Softix fallida: {}", message);
-            run.setStatus(SyncRunStatus.FAILED);
-            run.setFinishedAt(LocalDateTime.now());
-            run.setErrorMessage(message);
-            runRepository.save(run);
-            logRepository.save(new SoftixSyncRunLog(run.getId(), "ERROR", null, message));
-            throw new ApiException(HttpStatus.BAD_GATEWAY, message);
-        }
+    private SoftixImportNewSkuDto toNewSkuDto(SoftixCatalogSyncService.NewSku sku) {
+        return new SoftixImportNewSkuDto(
+                sku.sku(),
+                sku.brand(),
+                sku.reference(),
+                sku.color(),
+                sku.category(),
+                sku.name(),
+                sku.price(),
+                sku.stock(),
+                sku.state().name(),
+                sku.blockReason());
     }
 
     @Transactional(readOnly = true)
@@ -331,14 +392,16 @@ public class SoftixIntegrationService {
     public SoftixSyncRunDetailDto getRun(UUID id) {
         SoftixSyncRun run = runRepository.findById(id)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Sincronización no encontrada"));
-        List<SoftixSyncLogDto> logs = logRepository.findByRunIdOrderByIdAsc(id).stream()
-                .map(this::toLogDto)
+        List<SoftixSyncEventDto> events = eventRepository.findByRunIdOrderByIdAsc(id).stream()
+                .map(this::toEventDto)
                 .toList();
-        return new SoftixSyncRunDetailDto(toDto(run), logs);
+        return new SoftixSyncRunDetailDto(toDto(run), events);
     }
 
     private static String safeMessage(RuntimeException ex) {
-        if (ex instanceof SoftixClientException || ex instanceof ApiException) {
+        if (ex instanceof SoftixClientException || ex instanceof ApiException
+                || (ex instanceof IllegalStateException && ex.getMessage() != null
+                        && ex.getMessage().startsWith("Softix devolvió"))) {
             return ex.getMessage();
         }
         return UNEXPECTED_ERROR;
@@ -351,19 +414,30 @@ public class SoftixIntegrationService {
                 run.getStatus(),
                 run.getStartedAt(),
                 run.getFinishedAt(),
+                run.getCreatedCount(),
                 run.getUpdatedCount(),
                 run.getHiddenCount(),
+                run.getRestoredCount(),
                 run.getErrorCount(),
+                run.getNewBrandCount(),
+                run.getNewCategoryCount(),
                 run.getErrorMessage());
     }
 
-    private SoftixSyncLogDto toLogDto(SoftixSyncRunLog entry) {
-        return new SoftixSyncLogDto(entry.getId(), entry.getLevel(), entry.getSku(), entry.getFieldName(),
-                entry.getOldValue(), entry.getNewValue(), entry.getMessage(), entry.getCreatedAt());
+    private static SoftixSyncRunEvent toEvent(UUID runId, Entry entry) {
+        return new SoftixSyncRunEvent(runId, entry.entityType(), entry.key(), entry.action(), entry.level(),
+                entry.field(), entry.oldValue(), entry.newValue(), entry.message());
+    }
+
+    private SoftixSyncEventDto toEventDto(SoftixSyncRunEvent event) {
+        return new SoftixSyncEventDto(event.getId(), event.getEntityType(), event.getEntityKey(),
+                event.getAction(), event.getLevel(), event.getField(), event.getOldValue(),
+                event.getNewValue(), event.getMessage(), event.getCreatedAt());
     }
 
     private SoftixSyncIssueDto toIssueDto(Entry entry) {
-        return new SoftixSyncIssueDto(entry.level(), entry.sku(), entry.field(), entry.oldValue(),
+        String sku = entry.entityType() == SyncEventEntity.PRODUCT ? entry.key() : null;
+        return new SoftixSyncIssueDto(entry.level(), sku, entry.field(), entry.oldValue(),
                 entry.newValue(), entry.message());
     }
 }

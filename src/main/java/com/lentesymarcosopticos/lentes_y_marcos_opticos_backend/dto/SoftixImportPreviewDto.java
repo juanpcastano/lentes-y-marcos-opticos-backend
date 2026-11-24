@@ -15,6 +15,8 @@ public record SoftixImportPreviewDto(
         List<SoftixImportNewSkuDto> newSkus,
         List<String> ignoredBrands,
         List<String> ignoredSkus,
+        List<String> newBrands,
+        List<String> newCategories,
         List<String> toCreate,
         List<String> toUpdate,
         List<String> toHide,

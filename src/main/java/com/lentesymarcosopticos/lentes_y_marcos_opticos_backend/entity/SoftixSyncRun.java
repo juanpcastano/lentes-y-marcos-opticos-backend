@@ -42,11 +42,23 @@ public class SoftixSyncRun {
 	@Column(name = "finished_at")
 	private LocalDateTime finishedAt;
 
+	@Column(name = "created_count", nullable = false)
+	private Integer createdCount = 0;
+
 	@Column(name = "updated_count", nullable = false)
 	private Integer updatedCount = 0;
 
 	@Column(name = "hidden_count", nullable = false)
 	private Integer hiddenCount = 0;
+
+	@Column(name = "restored_count", nullable = false)
+	private Integer restoredCount = 0;
+
+	@Column(name = "new_brand_count", nullable = false)
+	private Integer newBrandCount = 0;
+
+	@Column(name = "new_category_count", nullable = false)
+	private Integer newCategoryCount = 0;
 
 	@Column(name = "error_count", nullable = false)
 	private Integer errorCount = 0;

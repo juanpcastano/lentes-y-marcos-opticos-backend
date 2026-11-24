@@ -75,7 +75,7 @@ public class ProductService {
 	public ProductDetailDto getProductById(UUID id) {
 		Product product = productRepository.findDetailById(id)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Product not found"));
-		if (product.getStatus() == ProductStatus.HIDDEN) {
+		if (product.getStatus() == ProductStatus.HIDDEN || isSoftixMissing(product)) {
 			throw new ApiException(HttpStatus.NOT_FOUND, "Product not found");
 		}
 		return toDetail(product);
@@ -142,14 +142,19 @@ public class ProductService {
 		}
 		return productRepository.findByBrand_IdAndReferenceAndIdNot(p.getBrand().getId(),
 						p.getReference(), p.getId()).stream()
-				.filter(other -> other.getStatus() == ProductStatus.ACTIVE)
+				.filter(other -> other.getStatus() == ProductStatus.ACTIVE && !isSoftixMissing(other))
 				.map(other -> new OtherColorDto(other.getId(), other.getColor(),
 						primaryImage(other), isAvailable(other)))
 				.toList();
 	}
 
 	private static boolean isAvailable(Product p) {
-		return p.getStatus() == ProductStatus.ACTIVE && p.getStock() != null && p.getStock() > 0;
+		return p.getStatus() == ProductStatus.ACTIVE && !isSoftixMissing(p)
+				&& p.getStock() != null && p.getStock() > 0;
+	}
+
+	private static boolean isSoftixMissing(Product p) {
+		return Boolean.TRUE.equals(p.getSoftixMissing());
 	}
 
 	private String primaryImage(Product p) {
