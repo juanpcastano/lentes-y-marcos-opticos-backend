@@ -129,11 +129,9 @@
       <version>1.23.0</version>
     </dependency>
 
-    <!-- Email -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-mail</artifactId>
-    </dependency>
+    <!-- =============================== 
+         EMAIL: retirado. La autenticación y las notificaciones usan WhatsApp.
+         =============================== -->
 
     <!-- AWS S3 (product image storage) -->
     <dependency>

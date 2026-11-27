@@ -10,14 +10,16 @@ import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.AuthCode;
 
 public interface AuthCodeRepository extends JpaRepository<AuthCode, UUID> {
 
-	List<AuthCode> findByEmailAndPurposeAndConsumedFalseAndExpiresAtAfterOrderByCreatedAtDesc(
-			String email, String purpose, LocalDateTime now);
+	List<AuthCode> findByIdentifierAndPurposeAndConsumedFalseOrderByCreatedAtDesc(
+			String identifier, String purpose);
 
-	List<AuthCode> findByEmailAndPurposeAndConsumedFalseOrderByCreatedAtDesc(
-			String email, String purpose);
+	List<AuthCode> findByIdentifierAndPurposeAndConsumedFalseAndExpiresAtAfterOrderByCreatedAtDesc(
+			String identifier, String purpose, LocalDateTime now);
 
-	long countByEmailAndPurposeAndCreatedAtAfter(
-			String email, String purpose, LocalDateTime since);
+	long countByIdentifierAndPurposeAndCreatedAtAfter(
+			String identifier, String purpose, LocalDateTime since);
 
-	long countByEmailAndCreatedAtAfter(String email, LocalDateTime since);
+	long countByIdentifierAndCreatedAtAfter(String identifier, LocalDateTime since);
+
+	long countByRequestIpAndCreatedAtAfter(String requestIp, LocalDateTime since);
 }

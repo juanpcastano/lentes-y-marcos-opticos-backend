@@ -23,19 +23,82 @@ public final class SoftixDtos {
             String documentType,
             String firstName,
             String middleName,
-            String lastName1,
-            String lastName2,
+            String lastName,
+            String secondLastName,
             String mobile,
             String phone,
             String email,
             String address,
             LocalDateTime birthDate,
             String city,
-            String district,
-            String gender) {
+            String locality,
+            String gender,
+            Integer authorization,
+            Integer rural,
+            BigDecimal consultationValue,
+            String personType,
+            String taxResponsibility,
+            String taxes,
+            String postalCode,
+            String regime,
+            String country,
+            String priceList,
+            Boolean blockedSales,
+            BigDecimal maxCreditLimit,
+            Integer creditDays,
+            String creationBranch,
+            String createdBy,
+            String bloodType,
+            LocalDateTime creationDate,
+            String checkDigit,
+            String company,
+            String occupation,
+            String maritalStatus,
+            String notes,
+            String membership,
+            String healthProvider,
+            String loyaltyObservation,
+            String socialNetwork,
+            Integer codAffinityHoya,
+            BigDecimal additionalDiscount) {
+        public CustomerResponse(
+                String documentId,
+                String documentType,
+                String firstName,
+                String middleName,
+                String lastName,
+                String secondLastName,
+                String mobile,
+                String phone,
+                String email,
+                String address,
+                LocalDateTime birthDate,
+                String city,
+                String locality,
+                String gender) {
+            this(documentId, documentType, firstName, middleName, lastName, secondLastName,
+                    mobile, phone, email, address, birthDate, city, locality, gender,
+                    null, null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null, null);
+        }
     }
 
     public record CustomerEnvelope(String message, CustomerResponse customer) {
+    }
+
+    /** Respuesta de GET /api/Customers/List. Solo pagina, sin búsqueda ni orden. */
+    public record CustomerPage(
+            Integer totalRecords,
+            Integer page,
+            Integer pageSize,
+            Integer totalPages,
+            String url,
+            List<CustomerResponse> client) {
+    }
+
+    /** Respuesta de GET /api/Customers/DocumentTypes/List. */
+    public record DocumentTypeItem(String documentTypeId, String documentName, Integer code) {
     }
 
     /**

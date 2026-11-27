@@ -13,8 +13,6 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -22,34 +20,18 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.security.JwtAuthenticationFilter;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.UserRepository;
 
 import lombok.AllArgsConstructor;
 
-/**
- * SecurityConfig
- */
 @Configuration
 @AllArgsConstructor
 public class SecurityConfig {
 
 	private final JwtAuthenticationFilter jwtFilter;
-	private final UserRepository userRepository;
 
 	@Bean
 	public PasswordEncoder passwordEncoder() {
 		return new BCryptPasswordEncoder();
-	}
-
-	@Bean
-	public UserDetailsService userDetailsService() {
-		return username -> userRepository.findByEmail(username)
-				.map(user -> org.springframework.security.core.userdetails.User
-						.withUsername(user.getEmail())
-						.password(user.getPasswordHash() == null ? "{noop}disabled" : user.getPasswordHash())
-						.roles(Boolean.TRUE.equals(user.getIsAdmin()) ? "ADMIN" : "USER")
-						.build())
-				.orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
 	}
 
 	@Bean
@@ -72,21 +54,19 @@ public class SecurityConfig {
 		return http.csrf(csrf -> csrf.disable())
 				.cors(Customizer.withDefaults())
 				.authorizeHttpRequests(auth -> auth
-					.requestMatchers(HttpMethod.POST,
-							"/api/auth/signup",
-							"/api/auth/login",
-							"/api/auth/login/options",
-							"/api/auth/refresh",
-							"/api/auth/logout",
-							"/api/auth/google",
-							"/api/auth/login/code-request",
-							"/api/auth/login/code-verify",
-							"/api/auth/password/reset/request",
-							"/api/auth/password/reset/verify",
-							"/api/auth/password/reset/confirm")
+						.requestMatchers(HttpMethod.POST,
+								"/api/auth/phone/start",
+								"/api/auth/phone/verify",
+								"/api/auth/phone/confirm",
+								"/api/auth/phone/lookup",
+								"/api/auth/phone/link",
+								"/api/auth/phone/create",
+								"/api/auth/refresh",
+								"/api/auth/logout")
 						.permitAll()
 						.requestMatchers(HttpMethod.GET, "/api/products/**", "/api/categories/**",
-								"/api/brands/**", "/api/hero-slides", "/api/inventory/availability/**")
+								"/api/brands/**", "/api/hero-slides", "/api/inventory/availability/**",
+								"/api/auth/phone/document-types")
 						.permitAll()
 						.requestMatchers("/api/admin/**").hasRole("ADMIN")
 						.requestMatchers("/error").permitAll()

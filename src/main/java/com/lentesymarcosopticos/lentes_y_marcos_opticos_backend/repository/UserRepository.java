@@ -7,13 +7,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.User;
 
-/**
- * UserRepository
- */
 public interface UserRepository extends JpaRepository<User, UUID> {
-	public Optional<User> findByEmail(String email);
 
-	public Optional<User> findByGoogleSub(String googleSub);
+	Optional<User> findByPhoneE164(String phoneE164);
 
-	public boolean existsByEmail(String email);
+	boolean existsByPhoneE164(String phoneE164);
+
+	boolean existsBySoftixClientId(String softixClientId);
 }

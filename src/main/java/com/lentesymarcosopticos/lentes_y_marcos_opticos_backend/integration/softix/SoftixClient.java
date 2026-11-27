@@ -44,9 +44,35 @@ public class SoftixClient {
                 .body(CustomerEnvelope.class)).customer();
     }
 
+    public CustomerPage listCustomers(int page, int pageSize) {
+        return executeAuthorized(token -> restClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/api/Customers/List")
+                        .queryParam("page", page).queryParam("pageSize", pageSize)
+                        .build())
+                .header("Authorization", "Bearer " + token)
+                .retrieve().body(CustomerPage.class));
+    }
+
+    public List<DocumentTypeItem> listDocumentTypes() {
+        return executeAuthorized(token -> restClient.get()
+                .uri("/api/Customers/DocumentTypes/List")
+                .header("Authorization", "Bearer " + token)
+                .retrieve().body(new ParameterizedTypeReference<List<DocumentTypeItem>>() {}));
+    }
+
     public String createCustomer(CustomerCreateRequest request) {
         return executeAuthorized(token -> restClient.post()
                 .uri("/api/customers/create")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(String.class));
+    }
+
+    public String updateCustomer(String documentId, CustomerCreateRequest request) {
+        return executeAuthorized(token -> restClient.put()
+                .uri("/api/customers/{documentId}", documentId)
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)

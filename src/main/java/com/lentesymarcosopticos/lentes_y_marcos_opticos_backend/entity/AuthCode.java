@@ -28,25 +28,35 @@ public class AuthCode {
 	@GeneratedValue(strategy = GenerationType.UUID)
 	private UUID id;
 
-	@Column(nullable = false)
-	private String email;
+	/** Teléfono en E.164. */
+	@Column(nullable = false, length = 20)
+	private String identifier;
 
-	@Column(nullable = false)
-	private String codeHash;
+	@Column(nullable = false, length = 20)
+	private String channel;
 
-	@Column(nullable = false)
+	@Column(nullable = false, length = 20)
 	private String purpose;
 
-	@Column(nullable = false)
+	@Column(name = "code_hash", nullable = false)
+	private String codeHash;
+
+	@Column(name = "expires_at", nullable = false)
 	private LocalDateTime expiresAt;
 
-	@Column
+	@Column(nullable = false)
 	private Boolean consumed;
 
 	@Column(nullable = false)
 	private int attempts;
 
+	@Column(name = "request_ip", length = 45)
+	private String requestIp;
+
+	@Column(name = "user_agent", length = 255)
+	private String userAgent;
+
 	@CreationTimestamp
-	@Column(nullable = false, updatable = false)
+	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 }

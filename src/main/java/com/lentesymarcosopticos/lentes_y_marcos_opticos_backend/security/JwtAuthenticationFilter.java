@@ -3,6 +3,7 @@ package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.security;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
@@ -19,10 +20,6 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.AllArgsConstructor;
-
-/**
- * JwtAuthenticationFilter
- */
 
 @Component
 @AllArgsConstructor
@@ -49,7 +46,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 				return;
 			}
 
-			String email = jwtService.extractEmail(token);
+			UUID userId = jwtService.extractUserId(token);
 
 			if (SecurityContextHolder.getContext().getAuthentication() != null) {
 				filterChain.doFilter(request, response);
@@ -61,18 +58,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 				authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN"));
 			}
 
-			UsernamePasswordAuthenticationToken user = new UsernamePasswordAuthenticationToken(
-					email,
-					null,
-					authorities);
-			SecurityContextHolder.getContext().setAuthentication(user);
+			UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+					userId.toString(), null, authorities);
+			SecurityContextHolder.getContext().setAuthentication(authentication);
 
 			filterChain.doFilter(request, response);
-
-		} catch (JwtException e) {
+		} catch (JwtException | IllegalArgumentException e) {
 			filterChain.doFilter(request, response);
-			return;
 		}
-
 	}
 }

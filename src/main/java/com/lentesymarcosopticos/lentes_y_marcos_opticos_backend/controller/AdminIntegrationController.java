@@ -20,6 +20,7 @@ import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixSyncPr
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixSyncRunDetailDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SoftixSyncRunDto;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SyncRunTrigger;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service.SoftixCustomerIndexService;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service.SoftixIntegrationService;
 
 import lombok.AllArgsConstructor;
@@ -33,10 +34,16 @@ import lombok.AllArgsConstructor;
 public class AdminIntegrationController {
 
 	private final SoftixIntegrationService integrationService;
+	private final SoftixCustomerIndexService customerIndexService;
 
 	@GetMapping("/connection")
 	public ResponseEntity<SoftixConnectionStatusDto> connection() {
 		return ResponseEntity.ok(integrationService.checkConnection());
+	}
+
+	@PostMapping("/customers/index/refresh")
+	public ResponseEntity<SoftixCustomerIndexService.IndexResult> refreshCustomerIndex() {
+		return ResponseEntity.ok(customerIndexService.refresh());
 	}
 
 	@GetMapping("/preview")

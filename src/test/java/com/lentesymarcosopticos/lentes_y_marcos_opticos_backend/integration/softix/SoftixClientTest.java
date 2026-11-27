@@ -34,6 +34,11 @@ class SoftixClientTest {
 
         assertThat(customer.documentId()).isEqualTo("123");
         assertThat(customer.firstName()).isEqualTo("Ana");
+        assertThat(customer.lastName()).isEqualTo("Pérez");
+        assertThat(customer.secondLastName()).isEqualTo("Gómez");
+        assertThat(customer.locality()).isEqualTo("001");
+        assertThat(customer.blockedSales()).isFalse();
+        assertThat(customer.maxCreditLimit()).isNotNull();
         server.verify();
     }
 
@@ -144,7 +149,13 @@ class SoftixClientTest {
                     "documentId": "%s",
                     "documentType": "CC",
                     "firstName": "Ana",
-                    "lastName1": "Pérez"
+                    "lastName": "Pérez",
+                    "secondLastName": "Gómez",
+                    "gender": "Femenino",
+                    "locality": "001",
+                    "consultationValue": 0,
+                    "blockedSales": false,
+                    "maxCreditLimit": 0
                   }
                 }
                 """.formatted(documentId);

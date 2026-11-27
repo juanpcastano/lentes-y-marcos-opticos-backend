@@ -1,299 +1,241 @@
 package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service;
 
-import java.util.Optional;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.AuthResult;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.CodeStatusResponse;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.GoogleLoginRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.LoginCodeRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.LoginCodeVerifyRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.LoginOptionsRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.LoginOptionsResponse;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.LoginRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PasswordCodeVerifyRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PasswordResetConfirmRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PasswordResetRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PasswordResetVerifyRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PasswordSetRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.ProfileUpdateRequest;
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.SignupRequest;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.LinkState;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PhoneAuthResponse;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PhoneStartRequest;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.PhoneVerifyRequest;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.UserResponse;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.PhoneVerification;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SoftixCustomerIndex;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.SoftixLinkChallenge;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.User;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.exception.ApiException;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.PhoneVerificationRepository;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.SoftixCustomerIndexRepository;
+import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.SoftixLinkChallengeRepository;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.UserRepository;
 
-import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
- * AuthService
+ * Ingreso por teléfono. El OTP solo verifica el número: si la cuenta ya está
+ * vinculada, emite sesión; si no, deja una verificación pendiente y NO crea la
+ * fila de `users`. La cuenta nace al completar la vinculación en Softix.
  */
 @Service
-@AllArgsConstructor
+@Slf4j
 public class AuthService {
 
-	private final PasswordEncoder passwordEncoder;
+	private static final int MAX_CANDIDATES = 3;
+	private static final int MAX_FAILED_ATTEMPTS_PER_HOUR = 3;
+	private static final int CHALLENGE_EXPIRY_MINUTES = 15;
+	private static final int REGISTRATION_EXPIRY_MINUTES = 15;
+
 	private final UserRepository userRepository;
-	private final JwtService jwtService;
+	private final PhoneVerificationRepository verificationRepository;
+	private final SoftixCustomerIndexRepository indexRepository;
+	private final SoftixLinkChallengeRepository challengeRepository;
 	private final OtpService otpService;
-	private final GoogleService googleService;
+	private final JwtService jwtService;
+	private final SessionService sessionService;
+	private final PhoneNormalizer phoneNormalizer;
+	private final CaptchaService captchaService;
+	private final String consentVersion;
 
-	public AuthResult register(SignupRequest signupRequest) {
-		if (userRepository.existsByEmail(signupRequest.email())) {
-			throw new ApiException(HttpStatus.CONFLICT, "Este email ya está registrado");
-		}
-		User userEntity = new User();
-		userEntity.setName(signupRequest.name());
-		userEntity.setEmail(signupRequest.email());
-		userEntity.setPhone(signupRequest.phone());
-
-		String passwordHash = passwordEncoder.encode(signupRequest.password());
-		userEntity.setPasswordHash(passwordHash);
-
-		userEntity.setIsAdmin(false);
-		User savedUser = userRepository.save(userEntity);
-		UserResponse user = toUserResponse(savedUser);
-		return new AuthResult(
-				jwtService.generateAccessToken(signupRequest.email(), false),
-				jwtService.generateRefreshToken(signupRequest.email()),
-				user);
+	public AuthService(UserRepository userRepository,
+			PhoneVerificationRepository verificationRepository,
+			SoftixCustomerIndexRepository indexRepository,
+			SoftixLinkChallengeRepository challengeRepository,
+			OtpService otpService,
+			JwtService jwtService,
+			SessionService sessionService,
+			PhoneNormalizer phoneNormalizer,
+			CaptchaService captchaService,
+			@Value("${legal.consent-version:2026-11}") String consentVersion) {
+		this.userRepository = userRepository;
+		this.verificationRepository = verificationRepository;
+		this.indexRepository = indexRepository;
+		this.challengeRepository = challengeRepository;
+		this.otpService = otpService;
+		this.jwtService = jwtService;
+		this.sessionService = sessionService;
+		this.phoneNormalizer = phoneNormalizer;
+		this.captchaService = captchaService;
+		this.consentVersion = consentVersion;
 	}
 
-	public AuthResult login(LoginRequest loginRequest) {
-
-		Optional<User> userQuery = userRepository.findByEmail(loginRequest.email());
-		User userEntity = userQuery
-				.orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Credenciales inválidas"));
-
-		if (!passwordEncoder.matches(loginRequest.password(), userEntity.getPasswordHash())) {
-			throw new ApiException(HttpStatus.UNAUTHORIZED, "Credenciales inválidas");
-		}
-
-		UserResponse user = toUserResponse(userEntity);
-		return new AuthResult(
-				jwtService.generateAccessToken(loginRequest.email(), Boolean.TRUE.equals(userEntity.getIsAdmin())),
-				jwtService.generateRefreshToken(loginRequest.email()),
-				user);
+	@Transactional
+	public void start(PhoneStartRequest request, String remoteIp, String userAgent) {
+		String phone = phoneNormalizer.normalize(request.phone());
+		captchaService.verify(request.captchaToken(), remoteIp);
+		otpService.requestCode(phone, OtpService.PURPOSE_LOGIN, remoteIp, userAgent);
 	}
 
-	public LoginOptionsResponse getLoginOptions(LoginOptionsRequest request) {
-		return userRepository.findByEmail(request.email())
-				.map(user -> new LoginOptionsResponse(
-						user.getPasswordHash() != null,
-						user.getGoogleSub() != null))
-				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND,
-						"Este email no está registrado"));
-	}
-
-	public void requestLoginCode(LoginCodeRequest request) {
-		Optional<User> userQuery = userRepository.findByEmail(request.email());
-		if (userQuery.isEmpty()) {
-			return;
-		}
-		otpService.generateAndSend(request.email(), "login");
-	}
-
-	public AuthResult verifyLoginCode(LoginCodeVerifyRequest request) {
-		if (!otpService.verifyAndConsume(request.email(), request.code(), "login")) {
+	@Transactional(noRollbackFor = ApiException.class)
+	public VerifyResult verify(PhoneVerifyRequest request, String remoteIp) {
+		String phone = phoneNormalizer.normalize(request.phone());
+		if (!otpService.verifyAndConsume(phone, OtpService.PURPOSE_LOGIN, request.code())) {
 			throw new ApiException(HttpStatus.UNAUTHORIZED, "Código inválido o expirado");
 		}
 
-		User user = userRepository.findByEmail(request.email())
-				.orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Código inválido o expirado"));
+		User user = userRepository.findByPhoneE164(phone).orElse(null);
+		if (user != null && user.getSoftixClientId() != null) {
+			user.setPhoneVerifiedAt(LocalDateTime.now());
+			user.setLastLoginAt(LocalDateTime.now());
+			applyConsent(user, request, remoteIp);
+			user = userRepository.save(user);
 
-		return new AuthResult(
-				jwtService.generateAccessToken(request.email(), Boolean.TRUE.equals(user.getIsAdmin())),
-				jwtService.generateRefreshToken(request.email()),
-				toUserResponse(user));
-	}
-
-	public AuthResult refresh(String refreshToken) {
-		if (!jwtService.isRefreshToken(refreshToken)) {
-			throw new ApiException(HttpStatus.UNAUTHORIZED, "Refresh token inválido o expirado");
+			SessionService.IssuedSession session = sessionService.issue(user);
+			PhoneAuthResponse response = new PhoneAuthResponse(session.accessToken(),
+					toUserResponse(user), LinkState.linked(), false);
+			return new VerifyResult(response, session.refreshToken(), null);
 		}
 
-		String email = jwtService.extractEmail(refreshToken);
-		User user = userRepository.findByEmail(email)
-				.orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Refresh token inválido o expirado"));
-
-		return new AuthResult(
-				jwtService.generateAccessToken(email, Boolean.TRUE.equals(user.getIsAdmin())),
-				jwtService.generateRefreshToken(email),
-				toUserResponse(user));
-	}
-
-	public UserResponse getMe() {
-
-		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-		String email = (String) auth.getPrincipal();
-
-		User user = userRepository.findByEmail(email)
-				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Usuario no encontrado"));
-
-		return toUserResponse(user);
-	}
-
-	public void requestPasswordCode() {
-		String email = getCurrentUserEmail();
-		otpService.generateAndSend(email, "manage_password");
-	}
-
-	public CodeStatusResponse getPasswordCodeStatus() {
-		String email = getCurrentUserEmail();
-		return otpService.getCodeStatus(email, "manage_password");
-	}
-
-	public void verifyPasswordCode(PasswordCodeVerifyRequest request) {
-		String email = getCurrentUserEmail();
-		if (!otpService.verifyOnly(email, request.code(), "manage_password")) {
-			throw new ApiException(HttpStatus.UNAUTHORIZED, "Código inválido o expirado");
-		}
-	}
-
-	public void setPassword(PasswordSetRequest request) {
-		String email = getCurrentUserEmail();
-		if (!otpService.verifyAndConsume(email, request.code(), "manage_password")) {
-			throw new ApiException(HttpStatus.UNAUTHORIZED, "Código inválido o expirado");
-		}
-
-		User user = getCurrentUser();
-		user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
-		userRepository.save(user);
-	}
-
-	public UserResponse updateProfile(ProfileUpdateRequest request) {
-		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-		String email = (String) auth.getPrincipal();
-
-		User user = userRepository.findByEmail(email)
-				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Usuario no encontrado"));
-
-		user.setName(request.name());
-		if (request.phone() != null) {
-			user.setPhone(request.phone());
-		}
-		userRepository.save(user);
-
-		return toUserResponse(user);
-	}
-
-	public void requestPasswordReset(PasswordResetRequest request) {
-		User user = userRepository.findByEmail(request.email())
-				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND,
-						"Este email no está registrado"));
-		otpService.generateAndSend(user.getEmail(), "reset_password");
-	}
-
-	public void verifyPasswordReset(PasswordResetVerifyRequest request) {
-		if (!otpService.verifyOnly(request.email(), request.code(), "reset_password")) {
-			throw new ApiException(HttpStatus.UNAUTHORIZED, "Código inválido o expirado");
-		}
-	}
-
-	public void confirmPasswordReset(PasswordResetConfirmRequest request) {
-		if (!otpService.verifyAndConsume(request.email(), request.code(), "reset_password")) {
-			throw new ApiException(HttpStatus.UNAUTHORIZED, "Código inválido o expirado");
-		}
-
-		User user = userRepository.findByEmail(request.email())
-				.orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Código inválido o expirado"));
-
-		user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
-		userRepository.save(user);
-	}
-
-	public AuthResult loginWithGoogle(GoogleLoginRequest request) {
-		var payload = googleService.verify(request.idToken());
-		String googleSub = payload.getSubject();
-		String email = payload.getEmail();
-		String name = (String) payload.get("name");
-		if (name == null || name.isBlank()) {
-			name = email;
-		}
-
-		User user = userRepository.findByGoogleSub(googleSub).orElse(null);
-
-		if (user == null) {
-			Optional<User> byEmail = userRepository.findByEmail(email);
-			if (byEmail.isPresent()) {
-				user = byEmail.get();
-				user.setGoogleSub(googleSub);
-				user = userRepository.save(user);
-			} else {
-				user = new User();
-				user.setName(name);
-				user.setEmail(email);
-				user.setGoogleSub(googleSub);
-				user.setIsAdmin(false);
-				user = userRepository.save(user);
-			}
-		}
-
-		return new AuthResult(
-				jwtService.generateAccessToken(user.getEmail(), Boolean.TRUE.equals(user.getIsAdmin())),
-				jwtService.generateRefreshToken(user.getEmail()),
-				toUserResponse(user));
-	}
-
-	public UserResponse linkGoogle(GoogleLoginRequest request) {
-		var payload = googleService.verify(request.idToken());
-		String googleSub = payload.getSubject();
-		String googleEmail = payload.getEmail();
-
-		User user = getCurrentUser();
-
-		Optional<User> alreadyLinked = userRepository.findByGoogleSub(googleSub);
-		if (alreadyLinked.isPresent() && !alreadyLinked.get().getId().equals(user.getId())) {
-			throw new ApiException(HttpStatus.CONFLICT, "Esta cuenta de Google ya está vinculada a otro usuario");
-		}
-
-		if (!googleEmail.equals(user.getEmail())) {
+		if (!Boolean.TRUE.equals(request.consentAccepted())) {
 			throw new ApiException(HttpStatus.BAD_REQUEST,
-					"El email de la cuenta de Google no coincide con el email de tu cuenta");
+					"Debes aceptar el tratamiento de datos para crear tu cuenta");
 		}
 
-		user.setGoogleSub(googleSub);
-		userRepository.save(user);
-		return toUserResponse(user);
+		PhoneVerification verification = new PhoneVerification();
+		verification.setId(UUID.randomUUID());
+		verification.setPhoneE164(phone);
+		verification.setUserId(user == null ? null : user.getId());
+		verification.setConsentVersion(consentVersion);
+		verification.setConsentAt(LocalDateTime.now());
+		verification.setConsentIp(remoteIp);
+		verification.setCreatedAt(LocalDateTime.now());
+		verification.setExpiresAt(LocalDateTime.now().plusMinutes(REGISTRATION_EXPIRY_MINUTES));
+		verification.setConsumed(false);
+		verification = verificationRepository.save(verification);
+
+		LinkState link = linkStateForVerification(verification);
+		String registrationToken = jwtService.generateRegistrationToken(
+				verification.getId(), phone);
+		PhoneAuthResponse response = new PhoneAuthResponse(null, null, link, true);
+		return new VerifyResult(response, null, registrationToken);
 	}
 
-	public UserResponse unlinkGoogle() {
-		User user = getCurrentUser();
-
-		if (user.getPasswordHash() == null) {
-			throw new ApiException(HttpStatus.CONFLICT,
-					"No puedes desvincular Google porque es tu único método de acceso");
-		}
-
-		user.setGoogleSub(null);
-		userRepository.save(user);
-		return toUserResponse(user);
+	@Transactional
+	public SessionResult refresh(String refreshToken) {
+		SessionService.RefreshResult result = sessionService.refresh(refreshToken);
+		PhoneAuthResponse response = new PhoneAuthResponse(result.accessToken(),
+				toUserResponse(result.user()), LinkState.linked(), false);
+		return new SessionResult(response, result.refreshToken());
 	}
 
-	private User getCurrentUser() {
-		String email = getCurrentUserEmail();
-		return userRepository.findByEmail(email)
-				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Usuario no encontrado"));
+	@Transactional
+	public void logout(String refreshToken) {
+		sessionService.logout(refreshToken);
 	}
 
-	private String getCurrentUserEmail() {
+	@Transactional(readOnly = true)
+	public UserResponse getMe() {
+		return toUserResponse(currentUser());
+	}
+
+	public User currentUser() {
 		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-		return (String) auth.getPrincipal();
+		if (auth == null || auth.getPrincipal() == null) {
+			throw unauthorized();
+		}
+		UUID userId;
+		try {
+			userId = UUID.fromString(auth.getPrincipal().toString());
+		} catch (IllegalArgumentException ex) {
+			throw unauthorized();
+		}
+		return userRepository.findById(userId)
+				.orElseThrow(AuthService::unauthorized);
 	}
 
-	private UserResponse toUserResponse(User user) {
+	public UserResponse toUserResponse(User user) {
 		return new UserResponse(
 				user.getId(),
-				user.getName(),
-				user.getEmail(),
-				user.getPhone(),
-				user.getPasswordHash() != null,
-				user.getGoogleSub() != null,
-				user.getIsAdmin());
+				user.getPhoneE164(),
+				user.getPhoneVerifiedAt() != null,
+				user.getSoftixClientId() != null,
+				Boolean.TRUE.equals(user.getIsAdmin()));
+	}
+
+	private LinkState linkStateForVerification(PhoneVerification verification) {
+		List<SoftixCustomerIndex> matches = indexRepository
+				.findByPhoneE164OrderBySoftixClientId(verification.getPhoneE164());
+		if (matches.isEmpty()) {
+			return LinkState.needsCreate();
+		}
+		if (matches.size() > MAX_CANDIDATES) {
+			return LinkState.contactStaff();
+		}
+
+		LocalDateTime now = LocalDateTime.now();
+		int recentAttempts = challengeRepository
+				.findByPhoneE164AndCreatedAtAfter(verification.getPhoneE164(), now.minusHours(1))
+				.stream()
+				.mapToInt(SoftixLinkChallenge::getAttempts)
+				.sum();
+		if (recentAttempts >= MAX_FAILED_ATTEMPTS_PER_HOUR) {
+			return LinkState.contactStaff();
+		}
+
+		SoftixLinkChallenge challenge = challengeRepository
+				.findFirstByPhoneVerificationIdAndConsumedFalseAndExpiresAtAfterOrderByCreatedAtDesc(
+						verification.getId(), now)
+				.orElseGet(() -> createChallenge(verification, matches, now));
+
+		List<String> hints = new ArrayList<>();
+		if (matches.size() > 1) {
+			for (SoftixCustomerIndex match : matches) {
+				hints.add(DocumentNumbers.mask(match.getSoftixClientId()));
+			}
+		}
+		return LinkState.needsDocument(challenge.getId().toString(), hints);
+	}
+
+	private SoftixLinkChallenge createChallenge(PhoneVerification verification,
+			List<SoftixCustomerIndex> matches, LocalDateTime now) {
+		List<String> candidates = matches.stream()
+				.map(SoftixCustomerIndex::getSoftixClientId)
+				.toList();
+		SoftixLinkChallenge challenge = new SoftixLinkChallenge();
+		challenge.setId(UUID.randomUUID());
+		challenge.setPhoneVerificationId(verification.getId());
+		challenge.setPhoneE164(verification.getPhoneE164());
+		challenge.setCandidateClientIds(String.join(",", candidates));
+		challenge.setAttempts(0);
+		challenge.setExpiresAt(now.plusMinutes(CHALLENGE_EXPIRY_MINUTES));
+		challenge.setConsumed(false);
+		challenge.setCreatedAt(now);
+		return challengeRepository.save(challenge);
+	}
+
+	private void applyConsent(User user, PhoneVerifyRequest request, String remoteIp) {
+		if (user.getConsentAt() == null && Boolean.TRUE.equals(request.consentAccepted())) {
+			user.setConsentVersion(consentVersion);
+			user.setConsentAt(LocalDateTime.now());
+			user.setConsentIp(remoteIp);
+		}
+	}
+
+	private static ApiException unauthorized() {
+		return new ApiException(HttpStatus.UNAUTHORIZED, "Sesión inválida o expirada");
+	}
+
+	public record VerifyResult(PhoneAuthResponse response, String refreshToken,
+			String registrationToken) {
+	}
+
+	public record SessionResult(PhoneAuthResponse response, String refreshToken) {
 	}
 }

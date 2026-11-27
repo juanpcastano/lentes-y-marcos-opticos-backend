@@ -9,35 +9,42 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.dto.CodeStatusResponse;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.entity.AuthCode;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.exception.ApiException;
 import com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.repository.AuthCodeRepository;
 
 import lombok.AllArgsConstructor;
 
+/**
+ * Códigos de un solo uso enviados por WhatsApp. Los códigos se guardan
+ * hasheados y nunca se registran en logs de producción.
+ */
 @Service
 @AllArgsConstructor
 public class OtpService {
+
+	public static final String PURPOSE_LOGIN = "LOGIN";
 
 	private static final int CODE_LENGTH = 6;
 	private static final int EXPIRY_MINUTES = 10;
 	private static final int COOLDOWN_SECONDS = 60;
 	private static final int MAX_CODES_PER_HOUR = 5;
-	private static final int MAX_CODES_PER_HOUR_GLOBAL = 8;
+	private static final int MAX_CODES_PER_DAY = 10;
+	private static final int MAX_CODES_PER_IP_HOUR = 10;
 	private static final int MAX_ATTEMPTS = 5;
 
 	private final AuthCodeRepository authCodeRepository;
 	private final PasswordEncoder passwordEncoder;
-	private final EmailService emailService;
+	private final WhatsAppService whatsAppService;
 
-	public void generateAndSend(String email, String purpose) {
+	public void requestCode(String phoneE164, String purpose, String requestIp, String userAgent) {
+		LocalDateTime now = LocalDateTime.now();
 		List<AuthCode> active = authCodeRepository
-				.findByEmailAndPurposeAndConsumedFalseOrderByCreatedAtDesc(email, purpose);
+				.findByIdentifierAndPurposeAndConsumedFalseOrderByCreatedAtDesc(phoneE164, purpose);
 
 		if (!active.isEmpty()) {
 			AuthCode latest = active.get(0);
-			long elapsedSeconds = Duration.between(latest.getCreatedAt(), LocalDateTime.now()).getSeconds();
+			long elapsedSeconds = Duration.between(latest.getCreatedAt(), now).getSeconds();
 			if (elapsedSeconds < COOLDOWN_SECONDS) {
 				long waitSeconds = COOLDOWN_SECONDS - elapsedSeconds;
 				throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
@@ -45,16 +52,23 @@ public class OtpService {
 			}
 		}
 
-		if (authCodeRepository.countByEmailAndPurposeAndCreatedAtAfter(
-				email, purpose, LocalDateTime.now().minusHours(1)) >= MAX_CODES_PER_HOUR) {
+		if (authCodeRepository.countByIdentifierAndPurposeAndCreatedAtAfter(
+				phoneE164, purpose, now.minusHours(1)) >= MAX_CODES_PER_HOUR) {
 			throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
-					"Has solicitado demasiados c\u00f3digos de este tipo. Intenta de nuevo en una hora.");
+					"Has solicitado demasiados códigos. Intenta de nuevo en una hora.");
 		}
 
-		if (authCodeRepository.countByEmailAndCreatedAtAfter(
-				email, LocalDateTime.now().minusHours(1)) >= MAX_CODES_PER_HOUR_GLOBAL) {
+		if (authCodeRepository.countByIdentifierAndCreatedAtAfter(
+				phoneE164, now.minusDays(1)) >= MAX_CODES_PER_DAY) {
 			throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
-					"Has solicitado demasiados c\u00f3digos. Intenta de nuevo en una hora.");
+					"Has solicitado demasiados códigos hoy. Intenta de nuevo mañana.");
+		}
+
+		if (requestIp != null && !requestIp.isBlank()
+				&& authCodeRepository.countByRequestIpAndCreatedAtAfter(
+						requestIp, now.minusHours(1)) >= MAX_CODES_PER_IP_HOUR) {
+			throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
+					"Demasiadas solicitudes desde esta conexión. Intenta más tarde.");
 		}
 
 		for (AuthCode authCode : active) {
@@ -63,22 +77,23 @@ public class OtpService {
 		authCodeRepository.saveAll(active);
 
 		String code = generateCode();
-		String hash = passwordEncoder.encode(code);
-
 		AuthCode authCode = new AuthCode();
-		authCode.setEmail(email);
-		authCode.setCodeHash(hash);
+		authCode.setIdentifier(phoneE164);
+		authCode.setChannel("WHATSAPP");
 		authCode.setPurpose(purpose);
-		authCode.setExpiresAt(LocalDateTime.now().plusMinutes(EXPIRY_MINUTES));
+		authCode.setCodeHash(passwordEncoder.encode(code));
+		authCode.setExpiresAt(now.plusMinutes(EXPIRY_MINUTES));
 		authCode.setConsumed(false);
 		authCode.setAttempts(0);
+		authCode.setRequestIp(truncate(requestIp, 45));
+		authCode.setUserAgent(truncate(userAgent, 255));
 		authCodeRepository.save(authCode);
 
-		emailService.sendOtpCode(email, code, purpose);
+		whatsAppService.sendOtp(phoneE164, code);
 	}
 
-	public boolean verifyAndConsume(String email, String code, String purpose) {
-		AuthCode match = findMatchingCode(email, code, purpose);
+	public boolean verifyAndConsume(String phoneE164, String purpose, String code) {
+		AuthCode match = findMatchingCode(phoneE164, purpose, code);
 		if (match == null) {
 			return false;
 		}
@@ -87,33 +102,13 @@ public class OtpService {
 		return true;
 	}
 
-	public boolean verifyOnly(String email, String code, String purpose) {
-		return findMatchingCode(email, code, purpose) != null;
-	}
-
-	public CodeStatusResponse getCodeStatus(String email, String purpose) {
-		LocalDateTime now = LocalDateTime.now();
-		List<AuthCode> unconsumed = authCodeRepository
-				.findByEmailAndPurposeAndConsumedFalseOrderByCreatedAtDesc(email, purpose);
-
-		boolean active = unconsumed.stream().anyMatch(c -> c.getExpiresAt().isAfter(now));
-
-		long cooldownSeconds = 0;
-		if (!unconsumed.isEmpty()) {
-			AuthCode latest = unconsumed.get(0);
-			long elapsedSeconds = Duration.between(latest.getCreatedAt(), now).getSeconds();
-			if (elapsedSeconds < COOLDOWN_SECONDS) {
-				cooldownSeconds = COOLDOWN_SECONDS - elapsedSeconds;
-			}
+	private AuthCode findMatchingCode(String phoneE164, String purpose, String code) {
+		if (code == null || code.isBlank()) {
+			return null;
 		}
-
-		return new CodeStatusResponse(active, cooldownSeconds);
-	}
-
-	private AuthCode findMatchingCode(String email, String code, String purpose) {
 		List<AuthCode> codes = authCodeRepository
-				.findByEmailAndPurposeAndConsumedFalseAndExpiresAtAfterOrderByCreatedAtDesc(
-						email, purpose, LocalDateTime.now());
+				.findByIdentifierAndPurposeAndConsumedFalseAndExpiresAtAfterOrderByCreatedAtDesc(
+						phoneE164, purpose, LocalDateTime.now());
 
 		for (AuthCode authCode : codes) {
 			if (passwordEncoder.matches(code, authCode.getCodeHash())) {
@@ -142,5 +137,12 @@ public class OtpService {
 			sb.append(random.nextInt(10));
 		}
 		return sb.toString();
+	}
+
+	private String truncate(String value, int max) {
+		if (value == null) {
+			return null;
+		}
+		return value.length() <= max ? value : value.substring(0, max);
 	}
 }

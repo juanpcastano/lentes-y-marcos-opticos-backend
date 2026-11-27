@@ -18,9 +18,9 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * User
+ * Cuenta local mínima. El perfil vive en Softix y la identidad es el teléfono
+ * verificado por OTP.
  */
-
 @Entity
 @Table(name = "users")
 @NoArgsConstructor
@@ -28,35 +28,33 @@ import lombok.Setter;
 @Getter
 @Setter
 public class User {
+
 	@Id
 	@GeneratedValue(strategy = GenerationType.UUID)
 	private UUID id;
 
-	@Column(nullable = false)
-	private String name;
+	@Column(name = "phone_e164", nullable = false, unique = true, length = 20)
+	private String phoneE164;
 
-	@Column(nullable = false, unique = true)
-	private String email;
+	@Column(name = "phone_verified_at", nullable = false)
+	private LocalDateTime phoneVerifiedAt;
 
-	@Column
-	private String passwordHash;
-
-	@Column(unique = true)
-	private String googleSub;
-
-	@Column
-	private String phone;
-
-	@Column(name = "softix_client_id", unique = true)
+	@Column(name = "softix_client_id", nullable = false, unique = true, length = 100)
 	private String softixClientId;
 
-	@Column(name = "softix_document_type")
-	private String softixDocumentType;
+	@Column(name = "softix_linked_at", nullable = false)
+	private LocalDateTime softixLinkedAt;
 
-	@Column(name = "softix_document_id")
-	private String softixDocumentId;
+	@Column(name = "consent_version", length = 20)
+	private String consentVersion;
 
-	@Column
+	@Column(name = "consent_at")
+	private LocalDateTime consentAt;
+
+	@Column(name = "consent_ip", length = 45)
+	private String consentIp;
+
+	@Column(name = "is_admin")
 	private Boolean isAdmin;
 
 	@CreationTimestamp
@@ -66,4 +64,7 @@ public class User {
 	@UpdateTimestamp
 	@Column(nullable = false)
 	private LocalDateTime updatedAt;
+
+	@Column(name = "last_login_at")
+	private LocalDateTime lastLoginAt;
 }
