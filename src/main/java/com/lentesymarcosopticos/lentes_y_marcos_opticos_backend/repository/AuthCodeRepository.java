@@ -22,4 +22,8 @@ public interface AuthCodeRepository extends JpaRepository<AuthCode, UUID> {
 	long countByIdentifierAndCreatedAtAfter(String identifier, LocalDateTime since);
 
 	long countByRequestIpAndCreatedAtAfter(String requestIp, LocalDateTime since);
+
+	long countByDeviceIdAndCreatedAtAfter(String deviceId, LocalDateTime since);
+
+	long countByChannelAndCreatedAtAfter(String channel, LocalDateTime since);
 }

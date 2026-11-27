@@ -56,6 +56,8 @@ class RegistrationServiceTest {
 	private JwtService jwtService;
 	@Mock
 	private AuthService authService;
+	@Mock
+	private SoftixWriteLimiter writeLimiter;
 
 	private RegistrationService service;
 	private PhoneVerification verification;
@@ -63,7 +65,8 @@ class RegistrationServiceTest {
 	@BeforeEach
 	void setUp() {
 		service = new RegistrationService(verificationRepository, challengeRepository,
-				userRepository, gateway, sessionService, jwtService, authService);
+				userRepository, gateway, sessionService, jwtService, authService,
+				writeLimiter);
 		verification = new PhoneVerification();
 		verification.setId(UUID.randomUUID());
 		verification.setPhoneE164(PHONE);
@@ -148,6 +151,7 @@ class RegistrationServiceTest {
 		assertThat(completed.response().accessToken()).isEqualTo("access");
 		assertThat(completed.refreshToken()).isEqualTo("refresh");
 		verify(gateway).updateCustomer("1000000089", body);
+		verify(writeLimiter).checkAndRecord(PHONE, SoftixWriteLimiter.OPERATION_LINK);
 		verify(userRepository).save(any(User.class));
 		assertThat(verification.getConsumed()).isTrue();
 		verify(gateway).upsertIndex(PHONE, "1000000089");
@@ -251,6 +255,7 @@ class RegistrationServiceTest {
 
 		assertThat(completed.response().accessToken()).isEqualTo("access");
 		verify(gateway).createCustomer(body);
+		verify(writeLimiter).checkAndRecord(PHONE, SoftixWriteLimiter.OPERATION_CREATE);
 		verify(userRepository).save(any(User.class));
 		assertThat(verification.getConsumed()).isTrue();
 		verify(gateway).upsertIndex(PHONE, "999");

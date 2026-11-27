@@ -56,6 +56,9 @@ public class AuthCode {
 	@Column(name = "user_agent", length = 255)
 	private String userAgent;
 
+	@Column(name = "device_id", length = 64)
+	private String deviceId;
+
 	@CreationTimestamp
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;

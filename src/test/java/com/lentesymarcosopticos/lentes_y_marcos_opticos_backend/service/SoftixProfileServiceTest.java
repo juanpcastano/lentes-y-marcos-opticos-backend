@@ -29,12 +29,14 @@ class SoftixProfileServiceTest {
 	private AuthService authService;
 	@Mock
 	private SoftixCustomerGateway gateway;
+	@Mock
+	private SoftixWriteLimiter writeLimiter;
 
 	private SoftixProfileService service;
 
 	@BeforeEach
 	void setUp() {
-		service = new SoftixProfileService(authService, gateway);
+		service = new SoftixProfileService(authService, gateway, writeLimiter);
 	}
 
 	@Test
@@ -60,6 +62,8 @@ class SoftixProfileServiceTest {
 
 		assertThat(response).isEqualTo(expected);
 		verify(gateway).updateCustomer(current.documentId(), body);
+		verify(writeLimiter).checkAndRecord(user.getPhoneE164(),
+				SoftixWriteLimiter.OPERATION_UPDATE);
 	}
 
 	@Test

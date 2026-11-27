@@ -27,6 +27,7 @@ public class SoftixProfileService {
 
 	private final AuthService authService;
 	private final SoftixCustomerGateway gateway;
+	private final SoftixWriteLimiter writeLimiter;
 
 	@Transactional(readOnly = true)
 	public SoftixProfileResponse getProfile() {
@@ -37,9 +38,13 @@ public class SoftixProfileService {
 	@Transactional
 	public SoftixProfileResponse updateProfile(SoftixProfileUpdateRequest request) {
 		User user = requireLinked();
+		writeLimiter.checkAndRecord(user.getPhoneE164(),
+				SoftixWriteLimiter.OPERATION_UPDATE);
+
 		CustomerResponse current = gateway.fetchCustomer(user.getSoftixClientId());
 		CustomerCreateRequest body = gateway.merge(current, request, user.getPhoneE164(),
 				user.getConsentAt() != null);
+
 		gateway.updateCustomer(current.documentId(), body);
 		return gateway.toProfile(body);
 	}

@@ -40,8 +40,14 @@ public class AuthController {
 
 	@PostMapping("/phone/start")
 	public ResponseEntity<Void> start(@Valid @RequestBody PhoneStartRequest request,
-			HttpServletRequest servletRequest) {
-		authService.start(request, clientIp(servletRequest), servletRequest.getHeader("User-Agent"));
+			HttpServletRequest servletRequest, HttpServletResponse servletResponse) {
+		String deviceId = cookieService.resolveDeviceId(servletRequest);
+		try {
+			authService.start(request, clientIp(servletRequest),
+					servletRequest.getHeader("User-Agent"), deviceId);
+		} finally {
+			cookieService.setDeviceCookie(servletResponse, deviceId);
+		}
 		return ResponseEntity.noContent().build();
 	}
 

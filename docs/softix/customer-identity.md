@@ -1,7 +1,7 @@
 # Softix: identidad de clientes y vinculación con el ecommerce
 
-> Última actualización: 2026-11-26.
-> Documento de decisiones para el rewrite de autenticación y vinculación.
+> Última actualización: 2026-11-27.
+> Documento de decisiones y referencia del flujo de autenticación y vinculación.
 > Complementa [`customers-create.md`](./customers-create.md) y
 > [`phase-1-validation.md`](./phase-1-validation.md).
 
@@ -19,9 +19,9 @@
   haya escrito.
 - Un documento de Softix solo puede estar vinculado a una cuenta local.
 
-El módulo actual de email/contraseña y Google se reemplaza. No hay login por
-email, contraseña ni Google en el flujo nuevo. Las migraciones se unificarán
-antes de la versión 1.0.
+El módulo anterior de email/contraseña y Google se eliminó. No hay login por
+email, contraseña ni Google. Las migraciones se unificarán antes de la versión
+1.0.
 
 ## 2. Flujo de ingreso y registro
 
@@ -53,9 +53,9 @@ Ingreso y registro son el mismo flujo.
 |---|---|---|
 | Sin fichas | No existe en Softix | Formulario vacío; crear ficha al confirmar |
 | Sin fichas | Existe sin teléfono | Precargar formulario; vincular al confirmar |
-| Sin fichas | Existe con otro teléfono | “Este documento ya está registrado con otro teléfono. Si crees que es un error, contáctanos.” |
+| Sin fichas | Existe con otro teléfono | “Este documento ya está registrado con otro número de teléfono. Contáctanos.” No crear. |
 | Con fichas | Coincide con una | Precargar formulario; vincular al confirmar |
-| Con fichas | No coincide con ninguna | “No pudimos verificar tus datos. Contáctanos.” No crear. |
+| Con fichas | No coincide con ninguna | En los dos primeros intentos: “No pudimos verificar tus datos. Revisa el documento e intenta de nuevo.” Al tercero: “No pudimos verificar tus datos. Contáctanos.” No crear. |
 | Más de 3 fichas | — | Remitir a personal, sin reto de documento |
 
 ### Precarga del formulario
@@ -71,6 +71,17 @@ para ese caso se conserva el mensaje de “documento registrado con otro
 teléfono”. Los teléfonos fijos o valores no normalizables no bloquean el
 vínculo.
 
+### Reglas de interfaz
+
+- La interfaz no muestra las palabras “Softix”, “ficha”, “tipo de documento” ni
+  decisiones internas. Habla de “documento”, “registro” y “cuenta”.
+- “Contáctanos” aparece una sola vez por mensaje, como acción del diálogo de
+  contacto; el texto del error no repite esa palabra.
+- El botón de envío del formulario de registro o vinculación dice siempre
+  “Crear cuenta” y ocupa todo el ancho, igual que los demás botones principales.
+- La consulta de documento se ejecuta solo al pulsar “Continuar”; no se consulta
+  mientras el usuario escribe.
+
 ## 3. Reto de documento
 
 - Se exige el **número de documento completo**. No se aceptan los últimos 4
@@ -83,9 +94,9 @@ vínculo.
   y otra en 9877”). El usuario debe escribir el documento completo; no lo elige
   de una lista.
 - Si hay **una sola ficha**, no se muestra la pista.
-- El cliente recibe un `challengeId` opaco por opción. Las pistas nunca revelan
-  más que los últimos 4 dígitos del documento base. El `softixClientId` nunca
-  sale del backend.
+- El cliente recibe un `challengeId` opaco por verificación. Las pistas nunca
+  revelan más que los últimos 4 dígitos del documento base. El
+  `softixClientId` nunca sale del backend.
 - Un teléfono con **más de 3 fichas** se considera un caso especial (número
   comodín) y se remite a personal.
 
@@ -183,6 +194,7 @@ cuenta sin ficha vinculada.
 - `user_id` (solo si existía una cuenta sin vincular)
 - `consent_version`, `consent_at`, `consent_ip`
 - `expires_at`, `consumed`, `created_at`
+- `document_lookup_attempts` (contador de consultas de documento; máximo 5)
 
 El OTP crea esta fila, no `users`. Si el usuario no completa la vinculación, la
 verificación expira y no queda cuenta.
@@ -194,7 +206,7 @@ verificación expira y no queda cuenta.
 - `purpose` (`LOGIN`, `VERIFY_PHONE`, ...)
 - `code_hash`
 - `expires_at`, `attempts`, `consumed`
-- `request_ip`, `user_agent`
+- `request_ip`, `user_agent`, `device_id`
 - `created_at`
 
 ### `auth_sessions`
@@ -218,6 +230,18 @@ Solo el mapeo. Sin nombre, documento ni dirección.
 - `candidate_client_ids` (solo del lado servidor)
 - `attempts`, `expires_at`, `consumed`
 - `created_at`
+
+### `softix_write_events`
+
+- `id` (UUID)
+- `subject_key` (teléfono E.164; también existe antes de crear `users`)
+- `operation` (`LINK`, `CREATE`, `UPDATE`)
+- `created_at`
+
+Registra cada intento de escritura en la ficha de Softix. Se guarda en una
+transacción independiente para que el límite de 3/hora cuente también los
+intentos que luego fallan en Softix. Los eventos con más de 7 días se eliminan
+con una limpieza diaria.
 
 ### `softix_index_runs`
 
@@ -262,29 +286,54 @@ verificar el total; no debe asumir que las páginas son consistentes.
 
 ## 7. Abuso y límites
 
+### Implementado
+
 | Acción | Límite |
 |---|---|
-| Inicio de OTP | 1 cada 60 s por teléfono; 5/hora; 10/día |
+| Inicio de OTP | 1 cada 60 s por teléfono; 5/hora; 10/día (ventana móvil de 24 h) |
 | Inicio de OTP por IP | 10/hora |
+| Inicio de OTP por dispositivo | 10/hora; usa la cookie httpOnly `lm_device` |
 | Verificación de código | 5 intentos; expira en 10 min; un solo uso |
-| Reto de documento | 3 intentos por hora; cada reto expira en 15 min |
-| Búsqueda de documento | 5 consultas por verificación |
-| Crear/actualizar ficha | 3/hora por usuario; más casos a personal |
-| Gasto de WhatsApp | Tope diario con alerta |
+| Reto de documento | 3 intentos por reto; cada reto expira en 15 min; 3 fallos acumulados en una hora remiten a personal |
+| Búsqueda de documento | 5 consultas por verificación (`document_lookup_attempts`) |
+| Crear/actualizar ficha | 3/hora por teléfono/usuario; cuentan los intentos, aunque Softix falle |
+| Gasto de WhatsApp | 500 OTP/día por defecto; alerta a 400 y se bloquea la solicitud 501 |
 
 Además:
 
-- captcha en el inicio de OTP;
+- captcha en el inicio de OTP (Turnstile en producción);
 - el inicio de OTP responde igual exista o no el teléfono;
-- códigos hasheados y nunca en logs;
-- alerta por picos de OTP o de gasto;
-- bloqueo temporal tras intentos fallidos repetidos.
+- códigos hasheados y de un solo uso; en producción no se registran en logs. En
+  modo consola de desarrollo el OTP se imprime a propósito para poder probarlo;
+- bloqueo del código tras 5 intentos fallidos y remisión a personal cuando el
+  reto de documento acumula 3 fallos en una hora;
+- el límite por dispositivo es una barrera adicional de mejor esfuerzo: si el
+  usuario borra la cookie se genera otro identificador, pero siguen activos los
+  límites por teléfono, IP y el captcha;
+- la escritura de ficha se registra en `softix_write_events` antes de llamar a
+  Softix; un fallo posterior no borra el intento ni permite reintentar sin
+  límite.
+
+### Alertas
+
+El sistema emite logs estructurados para que CloudWatch pueda generar alarmas:
+
+- `event=otp.daily_threshold count=... limit=... threshold=...` al pasar el
+  umbral diario;
+- `event=otp.daily_limit count=... limit=...` al alcanzar el tope diario;
+- `event=otp.spike count=... windowMinutes=... threshold=...` cuando se superan
+  50 solicitudes en 5 minutos. La alerta de pico tiene un enfriamiento de 15
+  minutos para no inundar los logs.
+
+La alarma de CloudWatch y su canal de notificación son configuración de
+despliegue; el backend ya emite la señal.
 
 La búsqueda de documento del formulario solo funciona con un token de registro
 recién verificado, admite como máximo **5 consultas por verificación** y
 únicamente devuelve datos de fichas **sin teléfono**. Es un intercambio
 deliberado para permitir la precarga; una ficha con otro móvil válido sigue
-protegida por el mensaje genérico de “documento registrado con otro teléfono”.
+protegida por el mensaje genérico de “documento registrado con otro número de
+teléfono”.
 
 ## 8. Datos de producción (2026-11-25, solo lectura)
 
@@ -339,7 +388,8 @@ se usó únicamente para pruebas de contrato.
 
 ## 9. Endpoints implementados
 
-- `POST /api/auth/phone/start` — teléfono + captcha; envía OTP por WhatsApp.
+- `POST /api/auth/phone/start` — teléfono + captcha; envía OTP por WhatsApp y
+  deja/renueva la cookie httpOnly `lm_device` para el límite por dispositivo.
 - `POST /api/auth/phone/verify` — teléfono + código + consentimiento. Si la
   cuenta ya está vinculada devuelve sesión; si no, deja una verificación
   pendiente, guarda el token de registro en cookie `httpOnly` y devuelve
@@ -378,12 +428,19 @@ desarrollo y `captcha.mode=turnstile` en producción.
 | `WHATSAPP_PHONE_NUMBER_ID` | ID del número en Meta Cloud API |
 | `WHATSAPP_ACCESS_TOKEN` | Token de Meta |
 | `WHATSAPP_TEMPLATE` | Plantilla aprobada de autenticación |
+| `WHATSAPP_DAILY_LIMIT` | OTP por día; 500 por defecto |
+| `WHATSAPP_DAILY_ALERT_THRESHOLD` | Umbral de alerta diaria; 400 por defecto |
+| `WHATSAPP_SPIKE_WINDOW_MINUTES` | Ventana del pico de OTP; 5 por defecto |
+| `WHATSAPP_SPIKE_THRESHOLD` | OTP en la ventana para alertar; 50 por defecto |
+| `WHATSAPP_SPIKE_ALERT_COOLDOWN_MINUTES` | Enfriamiento de la alerta de pico; 15 por defecto |
 | `CAPTCHA_MODE` | `disabled` o `turnstile` |
 | `CAPTCHA_SECRET` | Secreto de Turnstile |
 | `VITE_TURNSTILE_SITE_KEY` | Site key del widget en el frontend |
 | `CONSENT_VERSION` | Versión de la política aceptada |
+| `COOKIE_DEVICE_MAX_AGE_SECONDS` | Duración de la cookie de dispositivo; 15552000 (180 días) |
 | `SOFTIX_INDEX_SEED_ON_STARTUP` | Construir el índice al arrancar si está vacío |
 | `SOFTIX_INDEX_CRON` | Cron del refresco horario (por defecto `0 5 * * * *`) |
+| `SOFTIX_WRITE_EVENTS_CLEANUP_CRON` | Limpieza de eventos de escritura; por defecto `0 30 3 * * *` |
 
 El índice también se puede refrescar a mano con
 `POST /api/admin/integration/softix/customers/index/refresh`.
@@ -391,8 +448,12 @@ El índice también se puede refrescar a mano con
 ## 10. Pendientes
 
 - Aprobar en Meta la plantilla de autenticación y las plantillas utilitarias de
-  pedidos y citas. El código ya soporta Meta Cloud API y el modo consola.
-- Configurar el proveedor de captcha en producción (Turnstile ya implementado).
+  pedidos y citas. El proveedor es WhatsApp Cloud API de Meta; el modo consola
+  sigue disponible para desarrollo.
+- Configurar las credenciales de producción de Meta Cloud API y Cloudflare
+  Turnstile.
+- Configurar la alarma de CloudWatch y su canal de notificación para los eventos
+  `otp.daily_threshold`, `otp.daily_limit` y `otp.spike`.
 - Política definitiva para teléfonos con más de 3 fichas.
 - Jornada de limpieza de fichas.
 - Decidir si se acepta que `creationDate` se reescriba en cada edición o si se

@@ -2,6 +2,7 @@ package com.lentesymarcosopticos.lentes_y_marcos_opticos_backend.service;
 
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -31,14 +32,25 @@ public class OtpService {
 	private static final int MAX_CODES_PER_HOUR = 5;
 	private static final int MAX_CODES_PER_DAY = 10;
 	private static final int MAX_CODES_PER_IP_HOUR = 10;
+	private static final int MAX_CODES_PER_DEVICE_HOUR = 10;
 	private static final int MAX_ATTEMPTS = 5;
 
 	private final AuthCodeRepository authCodeRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final WhatsAppService whatsAppService;
+	private final OtpAbuseMonitor abuseMonitor;
 
-	public void requestCode(String phoneE164, String purpose, String requestIp, String userAgent) {
+	public void requestCode(String phoneE164, String purpose, String requestIp,
+			String userAgent, String deviceId) {
 		LocalDateTime now = LocalDateTime.now();
+		long todayCount = authCodeRepository.countByChannelAndCreatedAtAfter(
+				"WHATSAPP", LocalDate.now().atStartOfDay());
+		if (todayCount >= abuseMonitor.dailyLimit()) {
+			abuseMonitor.dailyLimitReached(todayCount);
+			throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
+					"No podemos enviar más códigos hoy. Intenta de nuevo mañana.");
+		}
+
 		List<AuthCode> active = authCodeRepository
 				.findByIdentifierAndPurposeAndConsumedFalseOrderByCreatedAtDesc(phoneE164, purpose);
 
@@ -71,6 +83,13 @@ public class OtpService {
 					"Demasiadas solicitudes desde esta conexión. Intenta más tarde.");
 		}
 
+		if (deviceId != null && !deviceId.isBlank()
+				&& authCodeRepository.countByDeviceIdAndCreatedAtAfter(
+						deviceId, now.minusHours(1)) >= MAX_CODES_PER_DEVICE_HOUR) {
+			throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
+					"Demasiadas solicitudes desde este dispositivo. Intenta más tarde.");
+		}
+
 		for (AuthCode authCode : active) {
 			authCode.setConsumed(true);
 		}
@@ -87,7 +106,13 @@ public class OtpService {
 		authCode.setAttempts(0);
 		authCode.setRequestIp(truncate(requestIp, 45));
 		authCode.setUserAgent(truncate(userAgent, 255));
+		authCode.setDeviceId(truncate(deviceId, 64));
 		authCodeRepository.save(authCode);
+
+		abuseMonitor.dailyUsageAlert(todayCount + 1);
+		long recent = authCodeRepository.countByChannelAndCreatedAtAfter(
+				"WHATSAPP", now.minusMinutes(abuseMonitor.spikeWindowMinutes()));
+		abuseMonitor.spikeDetected(recent);
 
 		whatsAppService.sendOtp(phoneE164, code);
 	}

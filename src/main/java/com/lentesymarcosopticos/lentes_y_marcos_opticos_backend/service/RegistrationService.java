@@ -45,6 +45,7 @@ public class RegistrationService {
 	private final SessionService sessionService;
 	private final JwtService jwtService;
 	private final AuthService authService;
+	private final SoftixWriteLimiter writeLimiter;
 
 	@Transactional(noRollbackFor = ApiException.class)
 	public RegistrationProfileResponse confirmLinkDocument(String registrationToken,
@@ -136,6 +137,8 @@ public class RegistrationService {
 		PhoneVerification verification = requireVerification(registrationToken);
 		String phone = verification.getPhoneE164();
 
+		writeLimiter.checkAndRecord(phone, SoftixWriteLimiter.OPERATION_LINK);
+
 		CustomerResponse current = gateway.fetchCustomer(request.documentId());
 		if (current.documentId() == null || !current.documentId().equals(request.documentId())) {
 			throw new ApiException(HttpStatus.BAD_GATEWAY,
@@ -160,6 +163,8 @@ public class RegistrationService {
 			SoftixCreateCustomerRequest request) {
 		PhoneVerification verification = requireVerification(registrationToken);
 		String phone = verification.getPhoneE164();
+
+		writeLimiter.checkAndRecord(phone, SoftixWriteLimiter.OPERATION_CREATE);
 
 		if (gateway.hasIndexForPhone(phone)) {
 			throw new ApiException(HttpStatus.CONFLICT,
